@@ -321,10 +321,10 @@ LLM_LOG_LEVEL=DEBUG
 ### Run API Tests
 ```bash
 # Basic API tests
-python client_test.py
+python tests/client_test.py
 
 # Interactive API testing
-python client_test.py --interactive
+python tests/client_test.py --interactive
 
 # Chat functionality tests
 pytest tests/test_chat.py -v
@@ -336,13 +336,13 @@ pytest tests/ -v
 ### Standalone Model Testing
 ```bash
 # Test default model
-python standalone_test.py
+python tests/standalone_test.py
 
 # Test specific model
-python standalone_test.py --model llama3-1b
+python tests/standalone_test.py --model llama3-1b
 
 # Interactive mode
-python standalone_test.py --interactive
+python tests/standalone_test.py --interactive
 ```
 
 ## Project Structure
@@ -351,12 +351,10 @@ python standalone_test.py --interactive
 llm_serving/
 ├── README.md               # This file
 ├── CLAUDE.md              # Development guidelines
-├── planning.md            # Implementation plan and status
+├── LICENSE                # MIT License
 ├── requirements.txt       # Python dependencies
 ├── setup.sh               # Automated setup script
 ├── chat_cli.py            # Interactive chat interface
-├── client_test.py         # API client tests
-├── standalone_test.py     # Standalone model tests
 ├── app/
 │   ├── __init__.py
 │   ├── main.py           # FastAPI application setup
@@ -375,6 +373,8 @@ llm_serving/
 │       └── schemas.py         # Pydantic request/response models
 └── tests/
     ├── __init__.py
+    ├── client_test.py     # API client tests
+    ├── standalone_test.py # Standalone model tests
     ├── test_api.py        # Basic API tests
     └── test_chat.py       # Chat functionality tests
 ```

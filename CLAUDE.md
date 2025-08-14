@@ -64,10 +64,10 @@ python chat_cli.py
 ### Testing
 ```bash
 # Run API integration tests (requires server to be running)
-python client_test.py
+python tests/client_test.py
 
 # Interactive API testing
-python client_test.py --interactive
+python tests/client_test.py --interactive
 
 # Chat functionality tests (comprehensive)
 pytest tests/test_chat.py -v
@@ -76,19 +76,19 @@ pytest tests/test_chat.py -v
 pytest tests/ -v
 
 # Standalone model testing (no server required)
-python standalone_test.py
+python tests/standalone_test.py
 
 # Test with different models
-python standalone_test.py --model gpt2-medium
-python standalone_test.py --model llama3-1b
-python standalone_test.py --model distilgpt2
+python tests/standalone_test.py --model gpt2-medium
+python tests/standalone_test.py --model llama3-1b
+python tests/standalone_test.py --model distilgpt2
 
 # Interactive standalone testing
-python standalone_test.py --interactive
-python standalone_test.py --model llama3-1b --interactive
+python tests/standalone_test.py --interactive
+python tests/standalone_test.py --model llama3-1b --interactive
 
 # Show available models
-python standalone_test.py --list-models
+python tests/standalone_test.py --list-models
 ```
 
 ### Model Management
@@ -144,12 +144,11 @@ Each model has a profile in `app/core/config.py` with:
 
 ### Legacy Files (Still Used)
 - `app/models/model_manager.py`: Legacy ModelManager for simple text generation
-- `standalone_test.py`: Direct model testing without API server
-- `client_test.py`: Basic API integration tests
+- `tests/standalone_test.py`: Direct model testing without API server
+- `tests/client_test.py`: Basic API integration tests
 
 ### User Interfaces
 - `chat_cli.py`: Interactive command-line chat interface with Rich formatting
-- `planning.md`: Implementation plan and current project status
 
 ### Testing
 - `tests/test_api.py`: Basic API endpoint tests
