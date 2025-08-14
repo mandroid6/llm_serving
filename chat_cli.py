@@ -686,6 +686,32 @@ class ChatInterface:
         
         console.print(table)
     
+    def get_voice_status_panel(self) -> Optional[Panel]:
+        """Create a voice status panel for the interface"""
+        if not self.voice_enabled:
+            return None
+        
+        try:
+            status = self.voice_manager.get_status()
+            
+            # Create status indicators
+            mode_icon = "🎤" if self.voice_mode else "⌨️"
+            mode_text = "Voice" if self.voice_mode else "Text"
+            recording_status = "🔴 Recording" if status.get('is_recording') else "⚪ Ready"
+            
+            whisper_status = "✅ Loaded" if status.get('whisper_loaded') else "⏳ Loading"
+            
+            status_text = f"{mode_icon} {mode_text} | {recording_status} | Whisper: {whisper_status}"
+            
+            return Panel(
+                status_text,
+                title="🎤 Voice Status",
+                border_style="dim",
+                padding=(0, 1)
+            )
+        except Exception:
+            return None
+    
     def show_help(self):
         """Show help message"""
         # Base commands
