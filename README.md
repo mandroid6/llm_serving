@@ -20,24 +20,78 @@ A production-ready LLM serving API built with FastAPI that supports both GPT-2 a
 - **Runtime**: PyTorch with CPU/GPU support
 - **Validation**: Pydantic schemas and request validation
 
-## Quick Start
+## Installation & Setup
 
-### 1. Install Dependencies
+### 🚀 Automated Setup (Recommended)
+
+**Quick setup with our installation script:**
+
 ```bash
-pip install -r requirements.txt
+# Clone or download the project
+git clone <repository-url> llm_serving
+cd llm_serving
+
+# Run the automated setup script
+./setup.sh
 ```
 
-### 2. Start the API Server
+The setup script will:
+- ✅ Check Python 3.8+ installation
+- 🐍 Create a virtual environment (`./venv`)
+- 📦 Install all dependencies from requirements.txt
+- 📁 Create required directories (`models`, `conversations`, `logs`)
+- ⚙️ Create default `.env` configuration file
+- 🖥️ Check for GPU support and provide optimization tips
+
+**After setup completion:**
+
 ```bash
+# 1. Activate virtual environment
+source venv/bin/activate
+
+# 2. Start the API server
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
 
-### 3. Start Chat Interface
-```bash
+# 3. In a new terminal, start chat interface
+source venv/bin/activate
 python chat_cli.py
 ```
 
-### 4. Chat Commands
+### 🛠️ Manual Setup
+
+**For advanced users or custom installations:**
+
+```bash
+# 1. Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# 2. Upgrade pip and install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# 3. Create required directories
+mkdir -p models conversations logs
+
+# 4. Create .env file (optional)
+cp .env.example .env  # Edit as needed
+
+# 5. Start the API server
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 📋 Requirements
+
+- **Python**: 3.8 or higher
+- **Memory**: 2GB+ RAM (4GB+ recommended for larger models)
+- **Storage**: 5GB+ free space for model downloads
+- **GPU** (optional): NVIDIA GPU with CUDA for acceleration
+
+## Quick Start
+
+**Once installation is complete, here's how to use the system:**
+
+### Chat Commands
 ```bash
 # List available models
 /models
@@ -299,6 +353,7 @@ llm_serving/
 ├── CLAUDE.md              # Development guidelines
 ├── planning.md            # Implementation plan and status
 ├── requirements.txt       # Python dependencies
+├── setup.sh               # Automated setup script
 ├── chat_cli.py            # Interactive chat interface
 ├── client_test.py         # API client tests
 ├── standalone_test.py     # Standalone model tests
