@@ -25,23 +25,8 @@ This is an LLM serving API built with FastAPI that serves GPT-2 for text generat
 
 ### Running the Application
 ```bash
-# Quick setup with automated script
-./setup.sh
-
-# Manual setup - Install dependencies with uv (faster than pip)
-# Option A: Modern approach with pyproject.toml (recommended)
-uv pip install -e .
-
-# Option B: Classic approach with requirements.txt
-uv pip install -r requirements.txt
-
-# Option C: Create and activate virtual environment with uv
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-uv pip install -e .
-
-# Install development dependencies
-uv pip install -e ".[dev]"
+# Install dependencies
+pip install -r requirements.txt
 
 # Start development server with auto-reload
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -75,21 +60,6 @@ python standalone_test.py --list-models
 
 # Unit tests with pytest
 pytest tests/test_api.py
-```
-
-### Development Workflow
-```bash
-# Install with development dependencies
-uv pip install -e ".[dev]"
-
-# Code formatting and linting
-black .                    # Format code
-isort .                    # Sort imports
-flake8                     # Lint code
-mypy app/                  # Type checking
-
-# Run all quality checks
-black . && isort . && flake8 && mypy app/
 ```
 
 ### Model Management
