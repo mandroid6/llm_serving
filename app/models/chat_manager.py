@@ -25,7 +25,7 @@ class ChatModelManager:
     """Enhanced model manager with chat support and conversation context"""
     
     def __init__(self, model_name: str = None):
-        self.model_name = model_name or settings.current_model
+        self.model_name = model_name or settings.model_name
         self.profile = get_model_profile(self.model_name)
         
         self.model = None

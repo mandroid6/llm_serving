@@ -8,23 +8,47 @@ set -e  # Exit on any error
 echo "🚀 Setting up LLM Serving API..."
 echo "=================================="
 
+# Function to compare version numbers
+version_ge() {
+    # Returns 0 (true) if $1 >= $2, 1 (false) otherwise
+    printf '%s\n%s\n' "$2" "$1" | sort -V -C
+}
+
 # Check if Python 3.8+ is available
 python_cmd=""
+min_version="3.8"
+
 if command -v python3 &> /dev/null; then
-    python_version=$(python3 --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
-    if [[ $(echo "$python_version >= 3.8" | bc -l) -eq 1 ]]; then
+    python_version=$(python3 --version 2>&1 | awk '{print $2}')
+    if version_ge "$python_version" "$min_version"; then
         python_cmd="python3"
     fi
 elif command -v python &> /dev/null; then
-    python_version=$(python --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
-    if [[ $(echo "$python_version >= 3.8" | bc -l) -eq 1 ]]; then
+    python_version=$(python --version 2>&1 | awk '{print $2}')
+    if version_ge "$python_version" "$min_version"; then
         python_cmd="python"
     fi
 fi
 
+# Fallback: check for specific Python versions if the above didn't work
+if [ -z "$python_cmd" ]; then
+    for py_ver in python3.12 python3.11 python3.10 python3.9 python3.8; do
+        if command -v "$py_ver" &> /dev/null; then
+            python_cmd="$py_ver"
+            python_version=$($py_ver --version 2>&1 | awk '{print $2}')
+            break
+        fi
+    done
+fi
+
 if [ -z "$python_cmd" ]; then
     echo "❌ Error: Python 3.8+ is required but not found."
-    echo "Please install Python 3.8 or higher and try again."
+    echo ""
+    echo "🍎 On macOS, you can install Python using:"
+    echo "   • Homebrew: brew install python"
+    echo "   • Official installer: https://www.python.org/downloads/"
+    echo "   • pyenv: pyenv install 3.11.0 && pyenv global 3.11.0"
+    echo ""
     exit 1
 fi
 
@@ -63,7 +87,7 @@ else
     exit 1
 fi
 
-# Check for GPU support
+# Check for GPU support (including Apple Silicon)
 echo ""
 echo "🔍 Checking for GPU support..."
 if command -v nvidia-smi &> /dev/null; then
@@ -72,8 +96,17 @@ if command -v nvidia-smi &> /dev/null; then
     echo ""
     echo "💡 For optimal GPU performance, consider installing CUDA-optimized PyTorch:"
     echo "   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118"
+elif [[ $(uname -m) == "arm64" ]] && [[ $(uname -s) == "Darwin" ]]; then
+    echo "🍎 Apple Silicon Mac detected. You can enable Metal GPU acceleration by setting:"
+    echo "   export LLM_DEVICE=mps"
+    echo ""
+    echo "💡 For optimal performance on Apple Silicon, ensure you have the latest PyTorch:"
+    echo "   pip install --upgrade torch torchvision torchaudio"
+elif [[ $(uname -s) == "Darwin" ]]; then
+    echo "🍎 Intel Mac detected. Using CPU mode (default)."
+    echo "💡 Consider upgrading to Apple Silicon for better ML performance."
 else
-    echo "ℹ️  No NVIDIA GPU detected. Using CPU mode (default)."
+    echo "ℹ️  No GPU acceleration detected. Using CPU mode (default)."
 fi
 
 # Create directories
@@ -86,10 +119,17 @@ echo "✅ Directories created: ./models, ./conversations, ./logs"
 echo ""
 echo "⚙️  Creating example configuration..."
 if [ ! -f ".env" ]; then
+    # Detect if we're on Apple Silicon for default device setting
+    if [[ $(uname -m) == "arm64" ]] && [[ $(uname -s) == "Darwin" ]]; then
+        default_device="mps"
+    else
+        default_device="cpu"
+    fi
+
     cat > .env << EOF
 # LLM Serving API Configuration
 LLM_MODEL_NAME=llama3-1b
-LLM_DEVICE=cpu
+LLM_DEVICE=${default_device}
 LLM_MODEL_CACHE_DIR=./models
 LLM_LOG_LEVEL=INFO
 LLM_MAX_CONVERSATION_LENGTH=50
@@ -127,4 +167,8 @@ echo "💡 Pro Tips:"
 echo "   - Use 'deactivate' to exit the virtual environment"
 echo "   - Modify .env file to customize settings"
 echo "   - Use smaller models (gpt2, distilgpt2) if you have limited memory"
-echo "   - Enable GPU with 'export LLM_DEVICE=cuda' for larger models"
+if [[ $(uname -m) == "arm64" ]] && [[ $(uname -s) == "Darwin" ]]; then
+    echo "   - Enable Apple Silicon GPU with 'export LLM_DEVICE=mps' for better performance"
+else
+    echo "   - Enable GPU with 'export LLM_DEVICE=cuda' for larger models (if NVIDIA GPU available)"
+fi

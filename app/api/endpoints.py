@@ -191,10 +191,10 @@ async def chat_message(request: ChatRequest) -> ChatResponse:
             conversation = active_conversations[request.conversation_id]
         else:
             # Create new conversation
-            system_prompt = request.system_prompt or settings.chat.default_system_prompt
+            system_prompt = request.system_prompt or settings.default_system_prompt
             conversation = Conversation(
                 system_prompt=system_prompt,
-                max_length=settings.chat.max_conversation_length
+                max_length=settings.max_conversation_length
             )
             active_conversations[conversation.id] = conversation
         
@@ -248,7 +248,7 @@ async def new_conversation(request: NewConversationRequest) -> ConversationRespo
         # Create new conversation
         conversation = Conversation(
             system_prompt=request.system_prompt,
-            max_length=request.max_length or settings.chat.max_conversation_length
+            max_length=request.max_length or settings.max_conversation_length
         )
         
         # Store conversation

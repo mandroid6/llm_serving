@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info("Starting LLM Serving API with Chat Support...")
-    logger.info(f"Current model: {settings.current_model}")
+    logger.info(f"Current model: {settings.model_name}")
     logger.info(f"Device: {settings.device}")
     logger.info(f"Chat models available: {', '.join(get_chat_models())}")
     
@@ -69,7 +69,7 @@ async def root():
     return {
         "message": "LLM Serving API with Chat Support",
         "version": settings.api_version,
-        "current_model": settings.current_model,
+        "current_model": settings.model_name,
         "chat_models": get_chat_models(),
         "endpoints": {
             "generation": {

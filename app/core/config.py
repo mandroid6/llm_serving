@@ -50,11 +50,16 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = False
 
-    # Model Configuration
-    current_model: str = "llama3-1b"  # Now using DialoGPT (no auth required)
+    # Model Configuration (matching environment variable names)
+    model_name: str = "llama3-1b"  # Renamed from current_model to match LLM_MODEL_NAME
     model_cache_dir: Optional[str] = "./models"
     
-    # Chat Configuration
+    # Chat Configuration (flattened to match environment variables)
+    max_conversation_length: int = 50  # Moved from nested chat settings
+    default_system_prompt: str = "You are a helpful AI assistant. Provide clear, concise, and accurate responses. Do not repeat the user's question. Answer directly and be conversational."
+    auto_save_interval: int = 10  # Save every N messages
+    
+    # Chat settings (for backward compatibility)
     chat: ChatSettings = Field(default_factory=ChatSettings)
 
     # Performance Settings
@@ -67,6 +72,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_prefix = "LLM_"
+        extra = "ignore"  # Ignore extra environment variables
 
 
 # Define available model profiles
