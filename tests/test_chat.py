@@ -41,15 +41,16 @@ class TestChatEndpoints:
         response = client.post("/api/v1/chat/new")
         assert response.status_code == 200
         data = response.json()
-        assert "conversation_id" in data
-        assert "message" in data
-        assert data["message"] == "New conversation started"
+        assert "id" in data  # Fixed: use "id" instead of "conversation_id"
+        assert "title" in data  # Fixed: ConversationResponse has title, not message
+        assert "created_at" in data
+        assert "messages" in data
         
     def test_chat_basic_message(self):
         """Test sending a basic chat message"""
         # Start new conversation
         new_conv_response = client.post("/api/v1/chat/new")
-        conv_id = new_conv_response.json()["conversation_id"]
+        conv_id = new_conv_response.json()["id"]  # Fixed: use "id"
         
         # Send a message
         payload = {
@@ -68,7 +69,7 @@ class TestChatEndpoints:
     def test_chat_with_parameters(self):
         """Test chat with custom generation parameters"""
         new_conv_response = client.post("/api/v1/chat/new")
-        conv_id = new_conv_response.json()["conversation_id"]
+        conv_id = new_conv_response.json()["id"]  # Fixed: use "id"
         
         payload = {
             "message": "Tell me a short story",
@@ -87,7 +88,7 @@ class TestChatEndpoints:
     def test_chat_conversation_context(self):
         """Test that conversation maintains context between messages"""
         new_conv_response = client.post("/api/v1/chat/new")
-        conv_id = new_conv_response.json()["conversation_id"]
+        conv_id = new_conv_response.json()["id"]  # Fixed: use "id"
         
         # First message
         payload1 = {
@@ -112,7 +113,7 @@ class TestChatEndpoints:
     def test_get_conversation(self):
         """Test retrieving conversation history"""
         new_conv_response = client.post("/api/v1/chat/new")
-        conv_id = new_conv_response.json()["conversation_id"]
+        conv_id = new_conv_response.json()["id"]  # Fixed: use "id"
         
         # Send a message
         payload = {
@@ -125,7 +126,7 @@ class TestChatEndpoints:
         response = client.get(f"/api/v1/chat/conversation/{conv_id}")
         assert response.status_code == 200
         data = response.json()
-        assert "conversation_id" in data
+        assert "id" in data  # Fixed: ConversationResponse uses "id"
         assert "messages" in data
         assert len(data["messages"]) >= 2  # User message + assistant response
         
@@ -161,7 +162,7 @@ class TestChatEndpoints:
     def test_empty_message(self):
         """Test chat with empty message"""
         new_conv_response = client.post("/api/v1/chat/new")
-        conv_id = new_conv_response.json()["conversation_id"]
+        conv_id = new_conv_response.json()["id"]  # Fixed: use "id"
         
         payload = {
             "message": "",
@@ -330,7 +331,7 @@ class TestModelIntegration:
                     
                     # Test that chat still works
                     new_conv_response = client.post("/api/v1/chat/new")
-                    conv_id = new_conv_response.json()["conversation_id"]
+                    conv_id = new_conv_response.json()["id"]  # Fixed: use "id"
                     
                     chat_payload = {
                         "message": "Test message",
@@ -390,7 +391,7 @@ class TestPerformance:
         for i in range(5):
             response = client.post("/api/v1/chat/new")
             assert response.status_code == 200
-            conversations.append(response.json()["conversation_id"])
+            conversations.append(response.json()["id"])  # Fixed: use "id"
         
         # Send messages to each conversation
         for conv_id in conversations:
@@ -404,7 +405,7 @@ class TestPerformance:
     def test_long_conversation(self):
         """Test handling longer conversations"""
         new_conv_response = client.post("/api/v1/chat/new")
-        conv_id = new_conv_response.json()["conversation_id"]
+        conv_id = new_conv_response.json()["id"]  # Fixed: use "id"
         
         # Send multiple messages in sequence
         for i in range(10):

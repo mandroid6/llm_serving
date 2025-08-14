@@ -202,14 +202,22 @@ async def chat_message(request: ChatRequest) -> ChatResponse:
         conversation.add_user_message(request.message)
         
         # Generate response
-        result = await chat_model_manager.chat(
+        result = None
+        async for chunk in chat_model_manager.chat(
             conversation=conversation,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
             top_p=request.top_p,
             top_k=request.top_k,
             stream=request.stream
-        )
+        ):
+            if chunk.get("finished", False):
+                result = chunk
+                break
+            # For streaming, we would handle chunks here
+        
+        if result is None:
+            raise RuntimeError("Failed to get response from chat model")
         
         # Update conversation in storage
         active_conversations[conversation.id] = result["conversation"]

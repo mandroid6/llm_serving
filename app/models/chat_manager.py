@@ -201,7 +201,7 @@ class ChatModelManager:
         top_p: float = None,
         top_k: int = None,
         stream: bool = False
-    ) -> Dict[str, Any]:
+    ):
         """Generate chat response for a conversation"""
         
         if not self.is_loaded:
@@ -225,13 +225,16 @@ class ChatModelManager:
             response_text = result["generated_text"][0]
             conversation.add_assistant_message(response_text)
             
-            return {
+            # Yield the result instead of returning it
+            yield {
                 "response": response_text,
                 "conversation": conversation,
                 "generation_time": result["generation_time"],
                 "model_name": self.profile.name,
-                "parameters": result["parameters"]
+                "parameters": result["parameters"],
+                "finished": True
             }
+            return
         
         start_time = time.time()
         
@@ -321,7 +324,8 @@ class ChatModelManager:
                 conversation.add_assistant_message(response_text)
                 generation_time = time.time() - start_time
                 
-                return {
+                # Yield the result instead of returning it
+                yield {
                     "response": response_text,
                     "conversation": conversation,
                     "generation_time": generation_time,
@@ -331,7 +335,8 @@ class ChatModelManager:
                         "temperature": temperature,
                         "top_p": top_p,
                         "top_k": top_k
-                    }
+                    },
+                    "finished": True
                 }
                 
         except Exception as e:
