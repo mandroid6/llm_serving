@@ -63,6 +63,7 @@ Hello, how are you today?
 
 ## Available Models
 
+### Basic Models (No Authentication Required)
 | Model | Size | Memory | Context | Best For |
 |-------|------|---------|---------|----------|
 | `gpt2` | 124MB | ~2GB | 1024 | Quick responses, lightweight |
@@ -70,6 +71,16 @@ Hello, how are you today?
 | `llama3-1b` | 1.2GB | ~4GB | 8192 | Chat conversations, efficient |
 | `llama3-3b` | 3.2GB | ~8GB | 8192 | High-quality chat, larger context |
 | `distilgpt2` | 82MB | ~1GB | 1024 | Fastest, smallest model |
+
+### Advanced Models (Qwen Series - High Performance)
+| Model | Size | Memory | Context | Best For |
+|-------|------|---------|---------|----------|
+| `qwen3-1.8b` | ~3.5GB | ~6GB | 32768 | ✨ **Advanced multilingual chat** |
+| `qwen3-3b` | ~6GB | ~8GB | 32768 | 🚀 **High-quality reasoning** |
+| `qwen3-7b` | ~14GB | ~16GB | 32768 | 🎯 **Professional tasks** |
+| `qwen3-14b` | ~28GB | ~32GB | 32768 | 🏆 **Enterprise-grade AI** |
+
+**💡 Tip**: Qwen models offer superior performance but require more memory. Start with `qwen3-1.8b` for the best balance of quality and resource usage.
 
 ## Chat Interface Usage
 
@@ -114,21 +125,65 @@ You: /models
 ┏━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Model         ┃ Status   ┃ Description                                  ┃
 ┡━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ llama3-1b     │ ✅ Loaded │ Meta Llama 3.2 1B Instruct                 │
-│ llama3-3b     │ Available│ Meta Llama 3.2 3B Instruct                 │
+│ llama3-1b     │ ✅ Loaded │ DialoGPT Medium (Chat)                      │
+│ qwen3-1.8b    │ Available│ Qwen2.5 1.8B - Advanced multilingual chat  │
+│ qwen3-3b      │ Available│ Qwen2.5 3B - High-quality reasoning         │
+│ qwen3-7b      │ Available│ Qwen2.5 7B - Professional tasks             │
 │ gpt2          │ Available│ OpenAI GPT-2                                │
 │ gpt2-medium   │ Available│ OpenAI GPT-2 Medium                         │
 │ distilgpt2    │ Available│ DistilGPT2                                  │
 └───────────────┴──────────┴──────────────────────────────────────────────┘
 
-You: /switch gpt2-medium
-🔄 Switching to model: gpt2-medium
+You: /switch qwen3-1.8b
+🔄 Switching to model: qwen3-1.8b
 ⏳ Loading model... (this may take a moment)
-✅ Successfully switched to gpt2-medium
+✅ Successfully switched to Qwen2.5 1.8B Instruct
 
-You: Hello again with the new model!
-Assistant: Hello! I'm now running on GPT-2 Medium. How can I assist you today?
+You: Hello! Can you help me write a Python function?
+Assistant: Hello! I'd be happy to help you write a Python function. Could you tell me what specific functionality you need? For example:
+
+- Mathematical calculations
+- Data processing 
+- File operations
+- Web scraping
+- API interactions
+
+Just describe what you want the function to do, and I'll create it for you with proper documentation and examples.
+
+You: /switch qwen3-7b  # For more complex tasks
+🔄 Switching to model: qwen3-7b
+⏳ Loading model... (downloading ~14GB, please wait)
+✅ Successfully switched to Qwen2.5 7B Instruct
+
+You: Write a complete web scraper for e-commerce prices
+Assistant: I'll create a comprehensive web scraper for e-commerce price monitoring. Here's a complete solution...
+[Much more detailed and sophisticated response]
 ```
+
+### GPU Configuration for Larger Models
+
+**🎯 Enable GPU Support**
+For Qwen 7B+ models, GPU acceleration is strongly recommended:
+
+```bash
+# Check if you have NVIDIA GPU
+nvidia-smi
+
+# Install GPU support
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Enable GPU in environment
+export LLM_DEVICE=cuda
+
+# Start server with GPU
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**💾 Memory Requirements by Model**
+- **qwen3-1.8b**: 6GB RAM (or 4GB VRAM)
+- **qwen3-3b**: 8GB RAM (or 6GB VRAM) 
+- **qwen3-7b**: 16GB RAM (or 8GB VRAM) ⚡ **GPU Recommended**
+- **qwen3-14b**: 32GB RAM (or 16GB VRAM) 🚨 **GPU Required**
 
 ## API Endpoints
 
@@ -459,11 +514,159 @@ curl -X POST "http://localhost:8000/api/v1/chat" -H "Content-Type: application/j
 
 ## Development
 
-### Adding New Models
-1. Add model profile to `app/core/config.py`
-2. Update `ChatModelManager` if special handling needed
-3. Add tests in `tests/test_chat.py`
-4. Update documentation
+### Adding New Models (e.g., Qwen3, Claude, GPT-4)
+
+**🚀 Complete Guide to Adding Large Language Models**
+
+#### Step 1: Add Model Profile
+Edit `app/core/config.py` and add your model to `MODEL_PROFILES`:
+
+```python
+"your-model-name": ModelProfile(
+    name="Display Name",
+    model_id="huggingface/model-id",  # e.g., "Qwen/Qwen2.5-7B-Instruct"
+    max_length=32768,                 # Context window size
+    chat_template="qwen",             # Template type (see step 2)
+    supports_chat=True,
+    memory_gb=16.0,                   # Estimated memory requirement
+    description="Model description",
+    default_temperature=0.7,
+    default_max_tokens=400,
+    default_top_p=0.8,
+    default_top_k=20
+),
+```
+
+#### Step 2: Add Chat Template (if needed)
+If your model uses a unique format, add to `CHAT_TEMPLATES`:
+
+```python
+"your-template": """<|start|>system
+{{ system_message }}<|end|>
+{% for message in messages %}<|start|>{{ message['role'] }}
+{{ message['content'] }}<|end|>
+{% endfor %}<|start|>assistant
+""",
+```
+
+**Common Template Formats:**
+- **Qwen**: `<|im_start|>role\ncontent<|im_end|>`
+- **Llama**: `<|start_header_id|>role<|end_header_id|>\ncontent<|eot_id|>`
+- **ChatML**: `<|im_start|>role\ncontent<|im_end|>`
+- **Alpaca**: `### Human:\ncontent\n\n### Assistant:\n`
+
+#### Step 3: Update Model Handling
+Add your model ID to the force list in `app/models/chat_manager.py`:
+
+```python
+force_custom_template = [
+    # ... existing models
+    "your-org/your-model-name",
+]
+```
+
+#### Step 4: Test Your Model
+```bash
+# Restart server
+uvicorn app.main:app --reload
+
+# Test via API
+curl -X POST "http://localhost:8000/api/v1/chat/switch-model" \
+  -H "Content-Type: application/json" \
+  -d '{"model_name": "your-model-name"}'
+
+# Test in CLI
+python chat_cli.py
+# /switch your-model-name
+# Hello! Test message
+```
+
+#### Step 5: Performance Optimization
+
+**For Large Models (7B+):**
+```python
+# Add to model profile
+default_temperature=0.7,        # Lower for consistency
+default_max_tokens=300,         # Reasonable length
+default_top_p=0.8,             # Focused sampling
+default_top_k=20,              # Reduced options
+```
+
+**Memory Management:**
+```python
+# In generation config (chat_manager.py)
+generation_config = GenerationConfig(
+    repetition_penalty=1.1,     # Reduce repetition
+    no_repeat_ngram_size=3,     # Avoid n-gram repetition
+    early_stopping=True,        # Stop at natural points
+    use_cache=True,            # Enable KV caching
+)
+```
+
+### Real Example: Adding Mistral 7B
+
+```python
+# 1. Add to MODEL_PROFILES
+"mistral-7b": ModelProfile(
+    name="Mistral 7B Instruct",
+    model_id="mistralai/Mistral-7B-Instruct-v0.2",
+    max_length=32768,
+    chat_template="mistral",
+    supports_chat=True,
+    memory_gb=16.0,
+    description="Mistral 7B - High-performance instruct model",
+    default_temperature=0.7,
+    default_max_tokens=300
+),
+
+# 2. Add template to CHAT_TEMPLATES
+"mistral": """<s>{% for message in messages %}{% if message['role'] == 'user' %}[INST] {{ message['content'] }} [/INST]{% elif message['role'] == 'assistant' %}{{ message['content'] }}</s>{% endif %}{% endfor %}""",
+
+# 3. Add to force_custom_template list
+"mistralai/Mistral-7B-Instruct-v0.2",
+```
+
+### Troubleshooting New Models
+
+**❌ Model won't load**
+- Check Hugging Face model ID is correct
+- Verify you have enough memory/VRAM
+- Check if model requires authentication
+
+**❌ Generates poor responses**
+- Adjust temperature (0.1-1.5)
+- Modify chat template format
+- Check max_tokens setting
+- Add repetition penalties
+
+**❌ Template errors**
+- Validate Jinja2 syntax
+- Check message role handling
+- Test with simple templates first
+
+### Model Recommendations by Use Case
+
+| Model Type | Size | Use Case | Config Tips |
+|------------|------|----------|-------------|
+| **Code** | 7B+ | Programming tasks | `temperature=0.1`, longer tokens |
+| **Chat** | 3-7B | Conversations | `temperature=0.7`, moderate tokens |
+| **Creative** | 7B+ | Writing, stories | `temperature=1.0`, high tokens |
+| **Analysis** | 14B+ | Complex reasoning | `temperature=0.3`, very long context |
+
+### Advanced Configuration
+
+**Quantization Support:**
+```python
+# For models with quantized versions
+model_id="microsoft/DialoGPT-medium-int8",  # 8-bit version
+memory_gb=1.0,  # Reduced memory requirement
+```
+
+**Multi-GPU Setup:**
+```python
+# Set device mapping for large models
+device_map="auto",  # Automatic GPU distribution
+```
 
 ### Contributing
 1. Fork the repository

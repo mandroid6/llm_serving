@@ -136,6 +136,63 @@ MODEL_PROFILES: Dict[str, ModelProfile] = {
         description="Distilled GPT-2 - Fastest option",
         default_max_tokens=100
     ),
+    
+    # Qwen3 Models (larger, more capable models)
+    "qwen3-1.8b": ModelProfile(
+        name="Qwen2.5 1.8B Instruct",
+        model_id="Qwen/Qwen2.5-1.5B-Instruct",
+        max_length=32768,  # Much longer context
+        chat_template="qwen",
+        supports_chat=True,
+        memory_gb=6.0,
+        description="Qwen2.5 1.8B - High-quality multilingual chat model",
+        default_temperature=0.7,
+        default_max_tokens=200,
+        default_top_p=0.8,
+        default_top_k=20
+    ),
+    
+    "qwen3-3b": ModelProfile(
+        name="Qwen2.5 3B Instruct", 
+        model_id="Qwen/Qwen2.5-3B-Instruct",
+        max_length=32768,
+        chat_template="qwen",
+        supports_chat=True,
+        memory_gb=8.0,
+        description="Qwen2.5 3B - Advanced multilingual chat model",
+        default_temperature=0.7,
+        default_max_tokens=300,
+        default_top_p=0.8,
+        default_top_k=20
+    ),
+    
+    "qwen3-7b": ModelProfile(
+        name="Qwen2.5 7B Instruct",
+        model_id="Qwen/Qwen2.5-7B-Instruct", 
+        max_length=32768,
+        chat_template="qwen",
+        supports_chat=True,
+        memory_gb=16.0,
+        description="Qwen2.5 7B - State-of-the-art multilingual chat model",
+        default_temperature=0.7,
+        default_max_tokens=400,
+        default_top_p=0.8,
+        default_top_k=20
+    ),
+    
+    "qwen3-14b": ModelProfile(
+        name="Qwen2.5 14B Instruct",
+        model_id="Qwen/Qwen2.5-14B-Instruct",
+        max_length=32768,
+        chat_template="qwen", 
+        supports_chat=True,
+        memory_gb=32.0,
+        description="Qwen2.5 14B - Premium multilingual chat model (requires high memory)",
+        default_temperature=0.7,
+        default_max_tokens=500,
+        default_top_p=0.8,
+        default_top_k=20
+    ),
 }
 
 
@@ -147,6 +204,13 @@ CHAT_TEMPLATES: Dict[str, str] = {
 
 {{ message['content'] }}<|eot_id|>{% endfor %}{% if add_generation_prompt %}<|start_header_id|>assistant<|end_header_id|>
 
+{% endif %}""",
+
+    "qwen": """<|im_start|>system
+{% if messages[0]['role'] == 'system' %}{{ messages[0]['content'] }}{% else %}You are a helpful assistant.{% endif %}<|im_end|>
+{% for message in messages %}{% if message['role'] != 'system' %}<|im_start|>{{ message['role'] }}
+{{ message['content'] }}<|im_end|>
+{% endif %}{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant
 {% endif %}""",
 
     "dialogpt": """{% for message in messages %}{% if message['role'] == 'user' %}{{ message['content'] }}{% elif message['role'] == 'assistant' %}{{ message['content'] }}{% endif %}{% if not loop.last %}<|endoftext|>{% endif %}{% endfor %}{% if add_generation_prompt %}<|endoftext|>{% endif %}""",
