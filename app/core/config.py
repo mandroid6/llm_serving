@@ -75,10 +75,12 @@ MODEL_PROFILES: Dict[str, ModelProfile] = {
         name="GPT-2",
         model_id="gpt2",
         max_length=1024,
-        supports_chat=False,
+        chat_template="gpt2",
+        supports_chat=True,  # Enable chat support
         memory_gb=2.0,
-        description="OpenAI GPT-2 - Fast text generation",
-        default_max_tokens=150
+        description="OpenAI GPT-2 - Fast text generation with chat support",
+        default_max_tokens=100,  # Shorter responses work better
+        default_temperature=0.7  # More focused responses
     ),
     
     "gpt2-medium": ModelProfile(
@@ -99,8 +101,10 @@ MODEL_PROFILES: Dict[str, ModelProfile] = {
         supports_chat=True,
         memory_gb=2.0,
         description="Microsoft DialoGPT Medium - Conversational AI",
-        default_temperature=0.7,
-        default_max_tokens=150
+        default_temperature=0.8,  # Higher temperature to avoid repetition
+        default_max_tokens=80,    # Moderate length
+        default_top_p=0.9,
+        default_top_k=40
     ),
     
     "llama3-3b": ModelProfile(
@@ -137,15 +141,17 @@ CHAT_TEMPLATES: Dict[str, str] = {
 
 {% endif %}""",
 
-    "dialogpt": """{% for message in messages %}{% if message['role'] == 'user' %}{{ message['content'] }}{% if not loop.last %}<|endoftext|>{% endif %}{% elif message['role'] == 'assistant' %}{{ message['content'] }}{% if not loop.last %}<|endoftext|>{% endif %}{% endif %}{% endfor %}{% if add_generation_prompt %}<|endoftext|>{% endif %}""",
+    "dialogpt": """{% for message in messages %}{% if message['role'] == 'user' %}{{ message['content'] }}<|endoftext|>{% elif message['role'] == 'assistant' %}{{ message['content'] }}<|endoftext|>{% endif %}{% endfor %}""",
     
-    "gpt2": """{% for message in messages %}{% if message['role'] == 'system' %}{{ message['content'] }}
+    "gpt2": """The following is a conversation between a human and a helpful AI assistant. The AI assistant gives helpful, detailed, and polite answers to the human's questions.
+
+{% for message in messages %}{% if message['role'] == 'system' %}Instructions: {{ message['content'] }}
 
 {% elif message['role'] == 'user' %}Human: {{ message['content'] }}
 
-{% elif message['role'] == 'assistant' %}AI: {{ message['content'] }}
+{% elif message['role'] == 'assistant' %}AI Assistant: {{ message['content'] }}
 
-{% endif %}{% endfor %}{% if add_generation_prompt %}AI: {% endif %}""",
+{% endif %}{% endfor %}{% if add_generation_prompt %}AI Assistant:{% endif %}""",
     
     "default": """{% for message in messages %}{% if message['role'] == 'system' %}System: {{ message['content'] }}
 {% elif message['role'] == 'user' %}Human: {{ message['content'] }}
