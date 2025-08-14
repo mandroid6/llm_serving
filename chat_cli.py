@@ -26,6 +26,15 @@ from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import confirm
 
+# Voice input support (optional)
+try:
+    from app.voice import VoiceInputManager, VoiceInputMode
+    VOICE_AVAILABLE = True
+except ImportError:
+    VOICE_AVAILABLE = False
+    VoiceInputManager = None
+    VoiceInputMode = None
+
 # Configuration
 DEFAULT_API_URL = "http://localhost:8000"
 CONVERSATIONS_DIR = Path("./conversations")
@@ -132,7 +141,7 @@ class ChatAPI:
 
 
 class ChatInterface:
-    """Rich command-line chat interface"""
+    """Rich command-line chat interface with voice input support"""
     
     def __init__(self, api: ChatAPI):
         self.api = api
@@ -140,6 +149,20 @@ class ChatInterface:
         self.current_model = "gpt2"
         self.available_models = {}
         self.chat_models = []
+        
+        # Voice input support
+        self.voice_manager = None
+        self.voice_enabled = False
+        self.voice_mode = False  # Toggle between text and voice input
+        
+        # Initialize voice input if available
+        if VOICE_AVAILABLE:
+            try:
+                self.voice_manager = VoiceInputManager()
+                self.voice_enabled = True
+            except Exception as e:
+                console.print(f"[yellow]⚠️ Voice input not available: {e}")
+                self.voice_enabled = False
         
     async def initialize(self):
         """Initialize the chat interface"""
@@ -160,19 +183,42 @@ class ChatInterface:
             console.print(f"[red]❌ Failed to get models: {e}")
             return False
         
+        # Initialize voice input if enabled
+        if self.voice_enabled and self.voice_manager:
+            try:
+                voice_ok = await self.voice_manager.initialize()
+                if not voice_ok:
+                    console.print(f"[yellow]⚠️ Voice input initialization failed, continuing without voice")
+                    self.voice_enabled = False
+                else:
+                    console.print(f"[green]✅ Voice input ready (Whisper model: {self.voice_manager.transcriber.model_name})")
+            except Exception as e:
+                console.print(f"[yellow]⚠️ Voice input error: {e}")
+                self.voice_enabled = False
+        
         return True
     
     def show_welcome(self):
         """Display welcome message"""
+        voice_status = ""
+        voice_commands = ""
+        
+        if self.voice_enabled:
+            voice_status = "\n[green]🎤 Voice input enabled[/green]"
+            voice_commands = """• [cyan]/voice[/cyan] - Toggle voice input mode
+• [cyan]/record[/cyan] - Record a voice message
+• [cyan]/voice-settings[/cyan] - Voice configuration
+"""
+        
         welcome_text = f"""
 [bold blue]🦙 LLM Chat Interface with Llama3[/bold blue]
-[dim]Connected to: {self.api.base_url}[/dim]
+[dim]Connected to: {self.api.base_url}[/dim]{voice_status}
 
 [bold]Available Commands:[/bold]
 • [cyan]/help[/cyan] - Show this help
 • [cyan]/models[/cyan] - List available models
 • [cyan]/switch <model>[/cyan] - Switch models
-• [cyan]/clear[/cyan] - Clear conversation history  
+{voice_commands}• [cyan]/clear[/cyan] - Clear conversation history  
 • [cyan]/save <filename>[/cyan] - Save conversation
 • [cyan]/load <filename>[/cyan] - Load conversation
 • [cyan]/quit[/cyan] - Exit
@@ -180,7 +226,7 @@ class ChatInterface:
 [bold]Current Model:[/bold] [green]{self.current_model}[/green]
 [bold]Chat Models:[/bold] {', '.join(self.chat_models)}
 
-[dim]Type your message and press Enter to chat![/dim]
+[dim]Type your message and press Enter to chat!{' Or use /voice to enable voice input!' if self.voice_enabled else ''}[/dim]
         """
         
         console.print(Panel(welcome_text, title="🚀 Welcome", border_style="blue"))

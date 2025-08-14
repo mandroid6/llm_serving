@@ -22,6 +22,12 @@ rich
 prompt-toolkit
 jinja2
 
+# Voice Input Support
+openai-whisper>=20231117
+pyaudio>=0.2.11
+keyboard>=0.13.5
+numpy>=1.24.0
+
 # Development and Testing
 pytest
 httpx
