@@ -538,23 +538,43 @@ class ChatInterface:
     
     def show_help(self):
         """Show help message"""
-        help_text = """
-[bold]📚 Available Commands:[/bold]
-
-[cyan]/help[/cyan] - Show this help message
+        # Base commands
+        base_commands = """[cyan]/help[/cyan] - Show this help message
 [cyan]/models[/cyan] - List all available models
 [cyan]/switch <model>[/cyan] - Switch to a different model
 [cyan]/clear[/cyan] - Clear conversation history
 [cyan]/save [filename][/cyan] - Save conversation (auto-named if no filename)
 [cyan]/load <filename>[/cyan] - Load saved conversation
-[cyan]/quit[/cyan] or [cyan]/exit[/cyan] - Exit the chat
+[cyan]/quit[/cyan] or [cyan]/exit[/cyan] - Exit the chat"""
+        
+        # Voice commands (if available)
+        voice_commands = ""
+        voice_tips = ""
+        
+        if self.voice_enabled:
+            voice_commands = """
+[bold]🎤 Voice Commands:[/bold]
+[cyan]/voice[/cyan] - Toggle voice input mode
+[cyan]/record[/cyan] - Record a single voice message
+[cyan]/voice-settings[/cyan] - Show voice configuration
+[cyan]/devices[/cyan] - List audio input devices
+"""
+            voice_tips = """• Use /voice to toggle between text and voice input
+• Voice input auto-stops on silence detection
+• All transcription happens locally (offline)
+• """
+        
+        help_text = f"""
+[bold]📚 Available Commands:[/bold]
+
+{base_commands}{voice_commands}
 
 [bold]💡 Tips:[/bold]
 • Use Tab for auto-completion
 • Press Ctrl+C to interrupt generation
 • Conversations auto-save every 10 messages
 • Use Llama3 models for best chat experience
-
+{voice_tips}
 [bold]🦙 Recommended Models:[/bold]
 • [green]llama3-1b[/green] - Fast, 4GB RAM required
 • [green]llama3-3b[/green] - Higher quality, 8GB RAM required
