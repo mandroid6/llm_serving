@@ -382,6 +382,57 @@ class ChatInterface:
             await self.api.new_conversation()
             console.print("[green]✅ Conversation cleared")
     
+    async def get_user_input(self) -> Optional[str]:
+        """Unified method to get user input (text or voice)"""
+        if self.voice_mode and self.voice_enabled:
+            return await self.get_voice_input()
+        else:
+            return await self.get_text_input()
+    
+    async def get_text_input(self) -> str:
+        """Get text input from user"""
+        prompt_text = "💬 You: "
+        if self.voice_enabled:
+            mode_indicator = " [green]🎤[/green]" if self.voice_mode else " [dim]⌨️[/dim]"
+            prompt_text = f"💬 You{mode_indicator}: "
+        
+        return toolkit_prompt(
+            prompt_text,
+            history=self.history,
+            auto_suggest=AutoSuggestFromHistory()
+        ).strip()
+    
+    async def get_voice_input(self) -> Optional[str]:
+        """Get voice input from user"""
+        if not self.voice_enabled or not self.voice_manager:
+            console.print("[red]❌ Voice input not available")
+            return None
+        
+        try:
+            # Show recording interface
+            console.print("[bold green]🎤 Recording... (speak now, will auto-stop on silence)[/bold green]")
+            
+            with Live(
+                Spinner("dots", text="[dim]🎤 Listening..."), 
+                console=console, 
+                transient=True
+            ) as live:
+                # Record voice input
+                text = await self.voice_manager.get_voice_input(
+                    mode=VoiceInputMode.AUTO_STOP
+                )
+            
+            if text:
+                console.print(f"[dim]📝 Transcribed: {text}[/dim]")
+                return text
+            else:
+                console.print("[yellow]⚠️ No speech detected or transcription failed")
+                return None
+                
+        except Exception as e:
+            console.print(f"[red]❌ Voice input error: {e}")
+            return None
+    
     def show_help(self):
         """Show help message"""
         help_text = """
@@ -421,12 +472,8 @@ class ChatInterface:
         
         while True:
             try:
-                # Get user input
-                user_input = toolkit_prompt(
-                    "💬 You: ",
-                    history=self.history,
-                    auto_suggest=AutoSuggestFromHistory()
-                ).strip()
+                # Get user input (text or voice)
+                user_input = await self.get_user_input()
                 
                 if not user_input:
                     continue
