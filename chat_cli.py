@@ -470,29 +470,45 @@ async def main():
 
 
 def run_chat():
-    """Main entry point that handles event loop detection"""
+    """Main entry point that handles event loop issues"""
+    # First check if we can import nest_asyncio to handle nested loops
     try:
-        # Try to get the current event loop
-        asyncio.get_running_loop()
-        # If we get here, there's already a running loop
-        console.print("[red]❌ Cannot start chat interface from within an async environment")
-        console.print("")
-        console.print("[yellow]💡 Solutions:")
-        console.print("[cyan]   1. Run from a regular terminal: python chat_cli.py")
-        console.print("[cyan]   2. Or use the API directly: curl http://localhost:8000/api/v1/chat/new")
-        console.print("[cyan]   3. Or try the web docs: http://localhost:8000/docs")
-        console.print("")
-        console.print("[dim]Current working directory:", Path.cwd())
-        return False
-        
-    except RuntimeError:
-        # No running loop, safe to use asyncio.run()
-        try:
-            asyncio.run(main())
-            return True
-        except Exception as e:
-            console.print(f"[red]❌ Error starting chat: {e}")
+        import nest_asyncio
+        nest_asyncio.apply()
+        console.print("[blue]🔧 Applied nest_asyncio for compatibility")
+    except ImportError:
+        pass
+    
+    # Try to run the chat
+    try:
+        asyncio.run(main())
+        return True
+    except RuntimeError as e:
+        if "cannot be called from a running event loop" in str(e):
+            console.print("[red]❌ Cannot start chat interface from within an async environment")
+            console.print("")
+            console.print("[yellow]💡 Solutions:")
+            console.print("[cyan]   1. Run from a regular terminal/command prompt:")
+            console.print("[cyan]      python chat_cli.py")
+            console.print("")
+            console.print("[cyan]   2. Or install nest-asyncio and try again:")
+            console.print("[cyan]      pip install nest-asyncio")
+            console.print("")
+            console.print("[cyan]   3. Or use the API directly with curl:")
+            console.print("[cyan]      curl -X POST http://localhost:8000/api/v1/chat/new")
+            console.print("")
+            console.print("[cyan]   4. Or use the web interface:")
+            console.print("[cyan]      http://localhost:8000/docs")
+            console.print("")
+            console.print(f"[dim]Current directory: {Path.cwd()}")
+            console.print(f"[dim]Error: {e}")
             return False
+        else:
+            # Re-raise other RuntimeErrors
+            raise
+    except Exception as e:
+        console.print(f"[red]❌ Error starting chat: {e}")
+        return False
 
 
 if __name__ == "__main__":
@@ -502,4 +518,4 @@ if __name__ == "__main__":
         console.print("\n[blue]👋 Goodbye![/blue]")
     except Exception as e:
         console.print(f"[red]❌ Unexpected error: {e}")
-        console.print("[yellow]💡 Try running from a regular terminal:")
+        console.print("[yellow]💡 Try running from a regular terminal")
