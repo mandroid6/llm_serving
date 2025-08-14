@@ -271,26 +271,184 @@ llm_serving/
 
 ## Troubleshooting
 
+### Model Authentication Issues
+
+**🔒 "Access to model is restricted" Error**
+Some models (like Meta Llama) require Hugging Face authentication:
+
+```bash
+# Option 1: Use pre-configured open models (recommended)
+# The system is already configured with open alternatives:
+# - llama3-1b → DialoGPT Medium (no auth required)
+# - llama3-3b → GPT-2 Large (no auth required)
+
+# Option 2: Set up Hugging Face authentication
+pip install huggingface_hub
+huggingface-cli login
+# Then accept model license at: https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct
+```
+
+### Chat Behavior Issues
+
+**🔄 Model Returns Same Message as Prompt**
+When models echo your input instead of responding:
+
+```bash
+# Test with higher temperature
+curl -X POST "http://localhost:8000/api/v1/chat" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Hello!",
+    "temperature": 0.9,
+    "max_tokens": 100
+  }'
+
+# Or adjust in chat CLI
+💬 You: /switch gpt2
+💬 You: Hello, how are you?
+```
+
+**🎲 GPT-2 Returns Random Text**
+GPT-2 needs proper conversation context:
+- ✅ **Fixed**: GPT-2 now has improved chat templates
+- Use `/switch gpt2` for better conversational responses
+- If still having issues, try `/switch llama3-1b` (DialoGPT)
+
+**🔧 Model Parameter Tuning**
+Adjust generation parameters for better responses:
+
+| Parameter | Low Value Issue | High Value Issue | Recommended |
+|-----------|----------------|------------------|-------------|
+| `temperature` | Repetitive, boring | Random, nonsensical | 0.7-0.9 |
+| `max_tokens` | Cut-off responses | Too verbose | 50-150 |
+| `top_p` | Limited variety | Too scattered | 0.8-0.95 |
+| `top_k` | Repetitive | Unfocused | 40-60 |
+
+### Chat Interface Issues
+
+**⚡ "asyncio.run() cannot be called from a running event loop"**
+Running chat CLI from async environment (Jupyter, IPython):
+
+```bash
+# Solution 1: Install nest-asyncio
+pip install nest-asyncio
+python chat_cli.py
+
+# Solution 2: Use regular terminal
+# Open plain command prompt/terminal (not Jupyter)
+python chat_cli.py
+
+# Solution 3: Use API directly
+curl -X POST "http://localhost:8000/api/v1/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello!"}'
+
+# Solution 4: Use web interface
+# Open browser: http://localhost:8000/docs
+```
+
+### Model Performance Issues
+
+**🚫 503 Service Unavailable on Model Switch**
+Model failed to load, usually due to memory:
+
+```bash
+# Check available memory
+free -h  # Linux
+vm_stat | grep "free\|inactive"  # macOS
+
+# Solutions:
+💬 You: /switch llama3-1b    # Try smaller model (2GB)
+💬 You: /switch gpt2         # Even smaller (2GB)
+💬 You: /switch distilgpt2   # Smallest (1GB)
+
+# Or enable GPU if available
+export LLM_DEVICE=cuda
+```
+
+**📊 Model Memory Requirements**
+
+| Model | Memory | Speed | Quality | Best For |
+|-------|--------|-------|---------|----------|
+| `distilgpt2` | ~1GB | ⚡⚡⚡ | ⭐⭐ | Testing, low-resource |
+| `gpt2` | ~2GB | ⚡⚡ | ⭐⭐⭐ | ✅ **General chat** |
+| `llama3-1b` | ~2GB | ⚡⚡ | ⭐⭐⭐⭐ | ✅ **Best conversation** |
+| `llama3-3b` | ~3GB | ⚡ | ⭐⭐⭐⭐⭐ | High-quality chat |
+
 ### Common Issues
 
-**Memory Issues**
+**💾 Memory Issues**
 - Start with smaller models (`gpt2`, `distilgpt2`, `llama3-1b`)
 - Use `LLM_DEVICE=cpu` if GPU memory is insufficient
 - Monitor system memory usage during model loading
+- Close other applications to free up RAM
 
-**Model Loading Errors**
+**📥 Model Loading Errors**
 - Check internet connection for initial model downloads
-- Verify sufficient disk space in model cache directory
+- Verify sufficient disk space in model cache directory (models can be 1-3GB)
 - Clear model cache if corruption suspected: `rm -rf ./models/`
+- Wait patiently - first download can take several minutes
 
-**Permission Errors**
+**🔐 Permission Errors**
 - Ensure write permissions for model cache directory
 - Use absolute paths in environment variables
+- On Linux/macOS: `chmod 755 ./models/`
 
-**CLI Issues**
-- Install required packages: `pip install rich prompt-toolkit`
+**🖥️ CLI Issues**
+- Install required packages: `pip install rich prompt-toolkit nest-asyncio`
 - Use Python 3.8+ for best compatibility
 - Check terminal supports UTF-8 for rich formatting
+- Try different terminal if colors/formatting broken
+
+### API Testing & Debugging
+
+**🧪 Test API Endpoints**
+```bash
+# 1. Health check
+curl http://localhost:8000/api/v1/health
+
+# 2. List models
+curl http://localhost:8000/api/v1/chat/models
+
+# 3. Test chat
+curl -X POST "http://localhost:8000/api/v1/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello!"}'
+
+# 4. Test with custom parameters
+curl -X POST "http://localhost:8000/api/v1/chat" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Write a Python function to add two numbers",
+    "temperature": 0.8,
+    "max_tokens": 150
+  }'
+```
+
+**🔍 Check Server Logs**
+Monitor the uvicorn server output for detailed error messages:
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Watch for error messages in the console output
+```
+
+### Getting Help
+
+If you're still having issues:
+
+1. **📋 Check server logs** for detailed error messages
+2. **🧪 Test with API directly** using curl commands above
+3. **💾 Try different models** starting with smallest (`distilgpt2`)
+4. **🔄 Restart the server** after configuration changes
+5. **🌐 Use web interface** at `http://localhost:8000/docs` for testing
+
+**🎯 Quick Diagnosis**
+```bash
+# Run this diagnostic sequence:
+curl http://localhost:8000/api/v1/health && echo "✅ Server OK" || echo "❌ Server issue"
+curl http://localhost:8000/api/v1/chat/models && echo "✅ Models OK" || echo "❌ Model config issue"
+curl -X POST "http://localhost:8000/api/v1/chat" -H "Content-Type: application/json" -d '{"message":"test"}' && echo "✅ Chat OK" || echo "❌ Chat issue"
+```
 
 ### Performance Tips
 

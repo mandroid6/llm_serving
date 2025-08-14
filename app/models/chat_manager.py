@@ -93,19 +93,27 @@ class ChatModelManager:
         if not self.profile.supports_chat:
             return
         
-        # Try to use model's built-in chat template first
-        if hasattr(self.tokenizer, 'chat_template') and self.tokenizer.chat_template:
-            logger.info("Using model's built-in chat template")
-            return
+        # For specific models, always use our custom templates
+        force_custom_template = [
+            "microsoft/DialoGPT-medium",
+            "gpt2", 
+            "gpt2-large",
+            "gpt2-medium",
+            "distilgpt2"
+        ]
         
-        # Fall back to our custom templates
-        template_name = self.profile.chat_template or "default"
-        if template_name in CHAT_TEMPLATES:
-            self.tokenizer.chat_template = CHAT_TEMPLATES[template_name]
-            logger.info(f"Using custom chat template: {template_name}")
+        # Use custom templates for models that need them
+        if self.profile.model_id in force_custom_template or not hasattr(self.tokenizer, 'chat_template') or not self.tokenizer.chat_template:
+            template_name = self.profile.chat_template or "default"
+            if template_name in CHAT_TEMPLATES:
+                self.tokenizer.chat_template = CHAT_TEMPLATES[template_name]
+                logger.info(f"Using custom chat template: {template_name}")
+            else:
+                logger.warning(f"Chat template '{template_name}' not found, using default")
+                self.tokenizer.chat_template = CHAT_TEMPLATES["default"]
         else:
-            logger.warning(f"Chat template '{template_name}' not found, using default")
-            self.tokenizer.chat_template = CHAT_TEMPLATES["default"]
+            # Use model's built-in chat template
+            logger.info("Using model's built-in chat template")
     
     async def generate_text(
         self,
@@ -277,7 +285,10 @@ class ChatModelManager:
                 do_sample=True,
                 pad_token_id=self.tokenizer.pad_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
-                use_cache=True
+                use_cache=True,
+                repetition_penalty=1.1,  # Reduce repetition
+                no_repeat_ngram_size=3,  # Avoid repeating 3-grams
+                early_stopping=True      # Stop at natural ending points
             )
             
             # Non-streaming generation for now (to avoid async generator issues)
@@ -293,7 +304,14 @@ class ChatModelManager:
             response_text = self.tokenizer.decode(
                 generated_tokens,
                 skip_special_tokens=True
-            )
+            ).strip()
+            
+            # Post-process response to clean up common issues
+            response_text = self._clean_response(response_text, conversation)
+            
+            # Ensure we have a meaningful response
+            if not response_text or len(response_text.strip()) < 3:
+                response_text = "I understand. Could you please rephrase your question?"
             
             # Add to conversation
             conversation.add_assistant_message(response_text)
@@ -317,6 +335,53 @@ class ChatModelManager:
         except Exception as e:
             logger.error(f"Chat generation failed: {str(e)}")
             raise RuntimeError(f"Chat generation failed: {str(e)}")
+    
+    def _clean_response(self, response_text: str, conversation: Conversation) -> str:
+        """Clean up the generated response to remove common issues"""
+        if not response_text:
+            return ""
+        
+        # Remove common prefixes that models sometimes add
+        prefixes_to_remove = [
+            "Bot:", "AI:", "Assistant:", "AI Assistant:", 
+            "Human:", "User:", "You:", "<|endoftext|>",
+            "The following is", "Here is", "This is"
+        ]
+        
+        original_response = response_text
+        for prefix in prefixes_to_remove:
+            if response_text.startswith(prefix):
+                response_text = response_text[len(prefix):].strip()
+                break
+        
+        # Remove repetitive patterns (common with some models)
+        lines = response_text.split('\n')
+        clean_lines = []
+        for line in lines:
+            line = line.strip()
+            if line and line not in clean_lines[-3:]:  # Avoid immediate repetition
+                clean_lines.append(line)
+        
+        response_text = '\n'.join(clean_lines).strip()
+        
+        # Handle cases where model repeats the user's message
+        last_user_message = conversation.get_last_user_message()
+        if last_user_message and response_text.lower().startswith(last_user_message.lower()[:20]):
+            # Find where the user message ends and new content begins
+            user_msg_words = last_user_message.split()[:5]  # First 5 words
+            response_words = response_text.split()
+            
+            # Find where the repetition ends
+            for i, word in enumerate(response_words):
+                if i >= len(user_msg_words) or word.lower() != user_msg_words[i].lower():
+                    response_text = ' '.join(response_words[i:]).strip()
+                    break
+        
+        # Ensure response doesn't start with punctuation
+        while response_text and response_text[0] in ".,!?;:":
+            response_text = response_text[1:].strip()
+        
+        return response_text or original_response
     
     async def _generate_stream(
         self, 

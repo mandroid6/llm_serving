@@ -28,7 +28,7 @@ class ModelProfile(BaseModel):
 
 class ChatSettings(BaseModel):
     """Chat-specific configuration"""
-    default_system_prompt: str = "You are a helpful AI assistant."
+    default_system_prompt: str = "You are a helpful AI assistant. Provide clear, concise, and accurate responses. Do not repeat the user's question. Answer directly and be conversational."
     max_conversation_length: int = 50  # Max turns to keep in context
     save_conversations: bool = True
     conversation_dir: str = "./conversations"
@@ -79,18 +79,24 @@ MODEL_PROFILES: Dict[str, ModelProfile] = {
         supports_chat=True,  # Enable chat support
         memory_gb=2.0,
         description="OpenAI GPT-2 - Fast text generation with chat support",
-        default_max_tokens=100,  # Shorter responses work better
-        default_temperature=0.7  # More focused responses
+        default_max_tokens=60,   # Shorter responses
+        default_temperature=1.0, # Higher temperature for variety
+        default_top_p=0.9,
+        default_top_k=50
     ),
     
     "gpt2-medium": ModelProfile(
         name="GPT-2 Medium",
         model_id="gpt2-medium",
         max_length=1024,
-        supports_chat=False,
+        chat_template="gpt2",
+        supports_chat=True,  # Enable chat support
         memory_gb=4.0,
-        description="OpenAI GPT-2 Medium - Better quality",
-        default_max_tokens=150
+        description="OpenAI GPT-2 Medium - Better quality with chat support",
+        default_max_tokens=80,
+        default_temperature=0.9,
+        default_top_p=0.95,
+        default_top_k=50
     ),
     
     "llama3-1b": ModelProfile(
@@ -101,10 +107,10 @@ MODEL_PROFILES: Dict[str, ModelProfile] = {
         supports_chat=True,
         memory_gb=2.0,
         description="Microsoft DialoGPT Medium - Conversational AI",
-        default_temperature=0.8,  # Higher temperature to avoid repetition
-        default_max_tokens=80,    # Moderate length
+        default_temperature=0.9,  # Higher for more variety
+        default_max_tokens=60,    # Shorter for better responses
         default_top_p=0.9,
-        default_top_k=40
+        default_top_k=50
     ),
     
     "llama3-3b": ModelProfile(
@@ -115,8 +121,10 @@ MODEL_PROFILES: Dict[str, ModelProfile] = {
         supports_chat=True,
         memory_gb=3.0,
         description="GPT-2 Large configured for chat",
-        default_temperature=0.7,
-        default_max_tokens=150
+        default_temperature=0.8,
+        default_max_tokens=80,    # Moderate length
+        default_top_p=0.95,
+        default_top_k=50
     ),
     
     "distilgpt2": ModelProfile(
@@ -141,22 +149,18 @@ CHAT_TEMPLATES: Dict[str, str] = {
 
 {% endif %}""",
 
-    "dialogpt": """{% for message in messages %}{% if message['role'] == 'user' %}{{ message['content'] }}<|endoftext|>{% elif message['role'] == 'assistant' %}{{ message['content'] }}<|endoftext|>{% endif %}{% endfor %}""",
+    "dialogpt": """{% for message in messages %}{% if message['role'] == 'user' %}{{ message['content'] }}{% elif message['role'] == 'assistant' %}{{ message['content'] }}{% endif %}{% if not loop.last %}<|endoftext|>{% endif %}{% endfor %}{% if add_generation_prompt %}<|endoftext|>{% endif %}""",
     
-    "gpt2": """The following is a conversation between a human and a helpful AI assistant. The AI assistant gives helpful, detailed, and polite answers to the human's questions.
+    "gpt2": """{% for message in messages %}{% if message['role'] == 'system' %}{{ message['content'] }}
 
-{% for message in messages %}{% if message['role'] == 'system' %}Instructions: {{ message['content'] }}
-
-{% elif message['role'] == 'user' %}Human: {{ message['content'] }}
-
-{% elif message['role'] == 'assistant' %}AI Assistant: {{ message['content'] }}
-
-{% endif %}{% endfor %}{% if add_generation_prompt %}AI Assistant:{% endif %}""",
+{% elif message['role'] == 'user' %}User: {{ message['content'] }}
+{% elif message['role'] == 'assistant' %}Bot: {{ message['content'] }}
+{% endif %}{% endfor %}{% if add_generation_prompt %}Bot:{% endif %}""",
     
     "default": """{% for message in messages %}{% if message['role'] == 'system' %}System: {{ message['content'] }}
 {% elif message['role'] == 'user' %}Human: {{ message['content'] }}
 {% elif message['role'] == 'assistant' %}Assistant: {{ message['content'] }}
-{% endif %}{% endfor %}{% if add_generation_prompt %}Assistant: {% endif %}"""
+{% endif %}{% endfor %}{% if add_generation_prompt %}Assistant:{% endif %}"""
 }
 
 
