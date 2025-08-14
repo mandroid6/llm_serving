@@ -55,6 +55,9 @@ class VoiceSettings(BaseModel):
     # UI settings
     show_transcription: bool = True    # Show transcribed text before sending
     auto_send_transcription: bool = True  # Automatically send transcribed text
+    
+    # Warning suppression (set to False to see Whisper warnings for debugging)
+    suppress_warnings: bool = True
 
 
 class Settings(BaseSettings):

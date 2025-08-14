@@ -7,6 +7,7 @@ import io
 import logging
 import os
 import tempfile
+import warnings
 from typing import Optional, Dict, Any
 import wave
 
@@ -19,6 +20,24 @@ except ImportError:
     whisper = None
 
 logger = logging.getLogger(__name__)
+
+# Function to conditionally suppress warnings based on settings
+def _maybe_suppress_warnings():
+    """Suppress Whisper warnings based on configuration"""
+    try:
+        from app.core.config import settings
+        if hasattr(settings, 'voice') and settings.voice.suppress_warnings:
+            warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
+            warnings.filterwarnings("ignore", message=".*torch.nn.utils.weight_norm.*")
+            warnings.filterwarnings("ignore", category=UserWarning, module="whisper")
+    except ImportError:
+        # Default to suppressing warnings if settings not available
+        warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
+        warnings.filterwarnings("ignore", message=".*torch.nn.utils.weight_norm.*")
+        warnings.filterwarnings("ignore", category=UserWarning, module="whisper")
+
+# Apply warning suppression
+_maybe_suppress_warnings()
 
 
 class WhisperTranscriber:
@@ -50,6 +69,15 @@ class WhisperTranscriber:
         self.model = None
         self._is_loading = False
         
+        # Check if warnings should be suppressed
+        self.suppress_warnings = True
+        try:
+            from app.core.config import settings
+            if hasattr(settings, 'voice'):
+                self.suppress_warnings = settings.voice.suppress_warnings
+        except ImportError:
+            pass  # Default to suppressing warnings
+        
         # Validate model name
         if model_name not in self.MODELS:
             logger.warning(f"Unknown model '{model_name}', using 'base' instead")
@@ -71,11 +99,20 @@ class WhisperTranscriber:
         try:
             logger.info(f"Loading Whisper model '{self.model_name}' ({self.MODELS[self.model_name]})")
             
-            # Load model in a thread to avoid blocking
+            # Load model in a thread to avoid blocking, with warnings suppressed
             loop = asyncio.get_event_loop()
+            
+            def load_model_with_suppressed_warnings():
+                if self.suppress_warnings:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        return whisper.load_model(self.model_name, device=self.device)
+                else:
+                    return whisper.load_model(self.model_name, device=self.device)
+            
             self.model = await loop.run_in_executor(
                 None,
-                lambda: whisper.load_model(self.model_name, device=self.device)
+                load_model_with_suppressed_warnings
             )
             
             logger.info(f"Whisper model '{self.model_name}' loaded successfully")
@@ -154,9 +191,19 @@ class WhisperTranscriber:
             
             # Run transcription in executor to avoid blocking
             loop = asyncio.get_event_loop()
+            
+            # Conditionally suppress warnings during transcription
+            def transcribe_with_optional_warning_suppression():
+                if self.suppress_warnings:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        return self.model.transcribe(temp_path, **options)
+                else:
+                    return self.model.transcribe(temp_path, **options)
+            
             result = await loop.run_in_executor(
                 None,
-                lambda: self.model.transcribe(temp_path, **options)
+                transcribe_with_optional_warning_suppression
             )
             
             # Extract information

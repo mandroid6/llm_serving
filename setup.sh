@@ -205,6 +205,11 @@ LLM_DEVICE=${default_device}
 LLM_MODEL_CACHE_DIR=./models
 LLM_LOG_LEVEL=INFO
 LLM_MAX_CONVERSATION_LENGTH=50
+
+# Voice Input Configuration
+LLM_VOICE_ENABLED=true
+LLM_VOICE_WHISPER_MODEL=base
+LLM_VOICE_SUPPRESS_WARNINGS=true
 EOF
     echo "✅ Created .env file with default configuration"
 else
@@ -247,6 +252,7 @@ echo "   - Use 'deactivate' to exit the virtual environment"
 echo "   - Modify .env file to customize settings"
 echo "   - Use smaller models (gpt2, distilgpt2) if you have limited memory"
 echo "   - Voice input works offline using OpenAI Whisper"
+echo "   - Set LLM_VOICE_SUPPRESS_WARNINGS=false to see Whisper warnings for debugging"
 if [[ $(uname -m) == "arm64" ]] && [[ $(uname -s) == "Darwin" ]]; then
     echo "   - Enable Apple Silicon GPU with 'export LLM_DEVICE=mps' for better performance"
 else
