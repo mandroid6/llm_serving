@@ -76,9 +76,28 @@ llm_serving/
 
 ## Getting Started
 
+### Quick Setup (Automated)
+```bash
+# One-command setup with uv
+./setup.sh
+```
+
+### Manual Setup
 1. **Install Dependencies**
    ```bash
-   pip install -r requirements.txt
+   # Install uv if you haven't already
+   pip install uv
+   
+   # Option A: Install with pyproject.toml (recommended)
+   uv pip install -e .
+   
+   # Option B: Install with requirements.txt
+   uv pip install -r requirements.txt
+   
+   # Option C: Create virtual environment with uv (isolated)
+   uv venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   uv pip install -e .
    ```
 
 2. **Run the Server**
