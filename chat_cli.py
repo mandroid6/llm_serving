@@ -237,7 +237,7 @@ class ChatInterface:
 """
         
         welcome_text = f"""
-[bold blue]🦙 LLM Chat Interface with Llama3[/bold blue]
+[bold blue]🤖 LLM Chat Interface with Voice Support[/bold blue]
 [dim]Connected to: {self.api.base_url}[/dim]{voice_status}
 
 [bold]Available Commands:[/bold]
@@ -749,11 +749,12 @@ class ChatInterface:
 • Use Tab for auto-completion
 • Press Ctrl+C to interrupt generation
 • Conversations auto-save every 10 messages
-• Use Llama3 models for best chat experience
+• Use Qwen models for best multilingual chat experience
 {voice_tips}
 [bold]🦙 Recommended Models:[/bold]
-• [green]llama3-1b[/green] - Fast, 4GB RAM required
-• [green]llama3-3b[/green] - Higher quality, 8GB RAM required
+• [green]qwen3-1.8b[/green] - High-quality multilingual, 6GB RAM required (default)
+• [green]qwen3-3b[/green] - Advanced quality, 8GB RAM required
+• [green]llama3-1b[/green] - Fast alternative, 4GB RAM required
         """
         console.print(Panel(help_text, title="🆘 Help", border_style="blue"))
     

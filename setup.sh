@@ -200,7 +200,7 @@ if [ ! -f ".env" ]; then
 
     cat > .env << EOF
 # LLM Serving API Configuration
-LLM_MODEL_NAME=llama3-1b
+LLM_MODEL_NAME=qwen3-1.8b
 LLM_DEVICE=${default_device}
 LLM_MODEL_CACHE_DIR=./models
 LLM_LOG_LEVEL=INFO

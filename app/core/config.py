@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Model Configuration (matching environment variable names)
-    model_name: str = "llama3-1b"  # Renamed from current_model to match LLM_MODEL_NAME
+    model_name: str = "qwen3-1.8b"  # Updated to use Qwen3 1.8B as default
     model_cache_dir: Optional[str] = "./models"
     
     # Chat Configuration (flattened to match environment variables)

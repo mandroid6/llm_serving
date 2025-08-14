@@ -4,7 +4,7 @@
 A production-ready LLM serving API built with FastAPI that supports both GPT-2 and Llama3 models with an interactive chat interface. Features include conversational AI, model switching, conversation management, and a rich command-line chat experience.
 
 ## Features
-- 🤖 **Multiple Models**: GPT-2, GPT-2 Medium, Llama3 1B, Llama3 3B, DistilGPT2
+- 🤖 **Multiple Models**: GPT-2, GPT-2 Medium, Qwen3 1.8B, Qwen3 3B, Llama3 models, DistilGPT2
 - 💬 **Chat Interface**: Interactive CLI with rich formatting and commands
 - 🔄 **Model Switching**: Switch between models during conversations
 - 💾 **Conversation Management**: Save and load chat histories
@@ -96,8 +96,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 # List available models
 /models
 
-# Switch to Llama3 model
-/switch llama3-1b
+# Switch to Qwen model 
+/switch qwen3-1.8b
 
 # Start chatting
 Hello, how are you today?
@@ -302,7 +302,7 @@ curl -X POST "http://localhost:8000/api/v1/chat/switch-model" \
 
 Environment variables with `LLM_` prefix:
 
-- `LLM_MODEL_NAME`: Default model (default: "llama3-1b")
+- `LLM_MODEL_NAME`: Default model (default: "qwen3-1.8b")
 - `LLM_DEVICE`: "cpu" or "cuda" (default: "cpu")
 - `LLM_MODEL_CACHE_DIR`: Model cache directory (default: "./models")
 - `LLM_LOG_LEVEL`: Logging level (default: "INFO")
@@ -422,7 +422,7 @@ curl -X POST "http://localhost:8000/api/v1/chat" \
 GPT-2 needs proper conversation context:
 - ✅ **Fixed**: GPT-2 now has improved chat templates
 - Use `/switch gpt2` for better conversational responses
-- If still having issues, try `/switch llama3-1b` (DialoGPT)
+- If still having issues, try `/switch qwen3-1.8b` (Qwen model)
 
 **🔧 Model Parameter Tuning**
 Adjust generation parameters for better responses:
@@ -468,7 +468,7 @@ free -h  # Linux
 vm_stat | grep "free\|inactive"  # macOS
 
 # Solutions:
-💬 You: /switch llama3-1b    # Try smaller model (2GB)
+💬 You: /switch qwen3-1.8b    # Try default model (6GB)
 💬 You: /switch gpt2         # Even smaller (2GB)
 💬 You: /switch distilgpt2   # Smallest (1GB)
 

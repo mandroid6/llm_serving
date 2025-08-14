@@ -49,7 +49,7 @@ python chat_cli.py
 # Available chat commands in chat_cli.py:
 /help            # Show all available commands
 /models          # List available models with status
-/switch <model>  # Switch to a different model (e.g., /switch llama3-1b)
+/switch <model>  # Switch to a different model (e.g., /switch qwen3-1.8b)
 /save <name>     # Save current conversation to file
 /load <name>     # Load a saved conversation
 /clear           # Clear current conversation history
@@ -80,12 +80,12 @@ python tests/standalone_test.py
 
 # Test with different models
 python tests/standalone_test.py --model gpt2-medium
-python tests/standalone_test.py --model llama3-1b
+python tests/standalone_test.py --model qwen3-1.8b
 python tests/standalone_test.py --model distilgpt2
 
 # Interactive standalone testing
 python tests/standalone_test.py --interactive
-python tests/standalone_test.py --model llama3-1b --interactive
+python tests/standalone_test.py --model qwen3-1.8b --interactive
 
 # Show available models
 python tests/standalone_test.py --list-models
@@ -93,15 +93,17 @@ python tests/standalone_test.py --list-models
 
 ### Model Management
 
-**Model Loading**: Models are automatically downloaded and cached to `./models/` on first use. Llama3 models are larger and may take longer to download:
+**Model Loading**: Models are automatically downloaded and cached to `./models/` on first use. Qwen models are larger and may take longer to download:
 
 - `gpt2`: ~124MB
 - `gpt2-medium`: ~355MB  
+- `qwen3-1.8b`: ~1.2GB
+- `qwen3-3b`: ~3.2GB
 - `llama3-1b`: ~1.2GB
 - `llama3-3b`: ~3.2GB
 - `distilgpt2`: ~82MB
 
-**Default Models**: The system defaults to `llama3-1b` for chat functionality and `gpt2` for text generation.
+**Default Models**: The system defaults to `qwen3-1.8b` for chat functionality and `gpt2` for text generation.
 
 **Model Switching**: Use the `/api/v1/chat/switch-model` endpoint or `/switch` command in CLI to change models during runtime.
 
@@ -115,7 +117,7 @@ python tests/standalone_test.py --list-models
 Settings are managed through `app/core/config.py` and can be overridden via environment variables with `LLM_` prefix:
 
 ### Core Settings
-- `LLM_MODEL_NAME`: Default model (default: "llama3-1b")
+- `LLM_MODEL_NAME`: Default model (default: "qwen3-1.8b")
 - `LLM_DEVICE`: "cpu" or "cuda" (default: "cpu")  
 - `LLM_MODEL_CACHE_DIR`: Model cache directory (default: "./models")
 - `LLM_LOG_LEVEL`: Logging level (default: "INFO")
