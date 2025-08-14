@@ -433,6 +433,109 @@ class ChatInterface:
             console.print(f"[red]❌ Voice input error: {e}")
             return None
     
+    async def toggle_voice_mode(self):
+        """Toggle between text and voice input modes"""
+        if not self.voice_enabled:
+            console.print("[red]❌ Voice input not available")
+            return
+        
+        self.voice_mode = not self.voice_mode
+        mode = "voice" if self.voice_mode else "text"
+        icon = "🎤" if self.voice_mode else "⌨️"
+        console.print(f"[green]✅ Switched to {mode} input mode {icon}")
+    
+    async def record_voice_message(self):
+        """Record a single voice message and send it"""
+        if not self.voice_enabled:
+            console.print("[red]❌ Voice input not available")
+            return
+        
+        try:
+            console.print("[bold green]🎤 Recording voice message... (speak now, will auto-stop on silence)[/bold green]")
+            
+            with Live(
+                Spinner("dots", text="[dim]🎤 Listening..."), 
+                console=console, 
+                transient=True
+            ) as live:
+                text = await self.voice_manager.get_voice_input(
+                    mode=VoiceInputMode.AUTO_STOP
+                )
+            
+            if text:
+                console.print(f"[dim]📝 Transcribed: {text}[/dim]")
+                await self.send_message(text)
+            else:
+                console.print("[yellow]⚠️ No speech detected or transcription failed")
+                
+        except Exception as e:
+            console.print(f"[red]❌ Voice recording error: {e}")
+    
+    def show_voice_settings(self):
+        """Display voice input settings"""
+        if not self.voice_enabled:
+            console.print("[red]❌ Voice input not available")
+            return
+        
+        status = self.voice_manager.get_status()
+        
+        settings_text = f"""
+[bold]🎤 Voice Input Settings[/bold]
+
+[bold]Status:[/bold]
+• Voice input: [green]{'Enabled' if status['is_enabled'] else 'Disabled'}[/green]
+• Current mode: [cyan]{status.get('current_mode', 'N/A')}[/cyan]
+• Whisper model: [cyan]{status.get('whisper_model', 'N/A')}[/cyan]
+• Language: [cyan]{status.get('language', 'N/A')}[/cyan]
+• Audio devices: [cyan]{status.get('audio_devices_count', 0)}[/cyan]
+
+[bold]Available Commands:[/bold]
+• [cyan]/voice[/cyan] - Toggle voice input mode
+• [cyan]/record[/cyan] - Record a single voice message
+• [cyan]/devices[/cyan] - List audio devices
+• [cyan]/voice-settings[/cyan] - Show this settings panel
+
+[bold]💡 Tips:[/bold]
+• Voice mode auto-stops on silence
+• Transcription happens locally with Whisper
+• Works offline (no internet required)
+        """
+        
+        console.print(Panel(settings_text, title="🎤 Voice Settings", border_style="green"))
+    
+    def show_audio_devices(self):
+        """Display available audio input devices"""
+        if not self.voice_enabled:
+            console.print("[red]❌ Voice input not available")
+            return
+        
+        devices = self.voice_manager.get_audio_devices()
+        
+        if not devices:
+            console.print("[yellow]⚠️ No audio input devices found")
+            return
+        
+        table = Table(title="🎤 Audio Input Devices")
+        table.add_column("Index", style="cyan")
+        table.add_column("Name", style="green")
+        table.add_column("Channels", style="yellow")
+        table.add_column("Sample Rate", style="magenta")
+        table.add_column("Status", style="white")
+        
+        current_device = self.voice_manager.device_index
+        
+        for device in devices:
+            status = "👑 Current" if device['index'] == current_device else ""
+            table.add_row(
+                str(device['index']),
+                device['name'],
+                str(device['channels']),
+                f"{device['sample_rate']:.0f} Hz",
+                status
+            )
+        
+        console.print(table)
+    
     def show_help(self):
         """Show help message"""
         help_text = """
@@ -530,6 +633,19 @@ class ChatInterface:
                     console.print(f"[yellow]Available files: {', '.join(f.name for f in files)}")
             else:
                 self.load_conversation(parts[1])
+        
+        # Voice commands
+        elif cmd == '/voice':
+            await self.toggle_voice_mode()
+        
+        elif cmd == '/record':
+            await self.record_voice_message()
+        
+        elif cmd == '/voice-settings':
+            self.show_voice_settings()
+        
+        elif cmd == '/devices':
+            self.show_audio_devices()
         
         else:
             console.print(f"[red]Unknown command: {command}")
