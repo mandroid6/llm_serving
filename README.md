@@ -6,7 +6,7 @@ Build a production-ready LLM serving API using FastAPI with a lightweight local 
 ## Technical Stack
 - **Framework**: FastAPI (for high-performance async API)
 - **Model Library**: Hugging Face Transformers
-- **Model Choice**: DistilGPT-2 or TinyLlama (lightweight, fast inference)
+- **Model Choice**: GPT-2 (open alternative to GPT-3)
 - **Runtime**: PyTorch
 - **Additional**: Pydantic for validation, uvicorn for ASGI server
 
@@ -18,7 +18,7 @@ Build a production-ready LLM serving API using FastAPI with a lightweight local 
 - Configure requirements.txt with pinned versions
 
 ### 2. Model Integration
-- Download and integrate a lightweight model (DistilGPT-2 ~82MB)
+- Download and integrate GPT-2 (~124MB)
 - Create model wrapper class for loading, caching, and inference
 - Implement text generation with configurable parameters
 
@@ -89,6 +89,22 @@ llm_serving/
 3. **Test the API**
    ```bash
    python client_test.py
+   ```
+
+4. **Test Models Standalone** (without server)
+   ```bash
+   # Test with default model
+   python standalone_test.py
+   
+   # Test with different models
+   python standalone_test.py --model gpt2-medium
+   python standalone_test.py --model distilgpt2
+   
+   # Interactive mode
+   python standalone_test.py --interactive
+   
+   # Show available models
+   python standalone_test.py --list-models
    ```
 
 ## API Endpoints

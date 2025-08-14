@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview
 
-This is an LLM serving API built with FastAPI that serves DistilGPT-2 for text generation. The architecture follows a layered pattern with clear separation of concerns:
+This is an LLM serving API built with FastAPI that serves GPT-2 for text generation. The architecture follows a layered pattern with clear separation of concerns:
 
 - **API Layer** (`app/api/`): FastAPI endpoints with async handlers and Pydantic validation
 - **Model Layer** (`app/models/`): Singleton ModelManager that handles Hugging Face transformer loading, caching, and inference
@@ -46,8 +46,17 @@ python client_test.py --interactive
 # Standalone model testing (no server required)
 python standalone_test.py
 
+# Test with different models
+python standalone_test.py --model gpt2-medium
+python standalone_test.py --model distilgpt2
+python standalone_test.py --model EleutherAI/gpt-neo-125M
+
 # Interactive standalone testing
 python standalone_test.py --interactive
+python standalone_test.py --model gpt2-large --interactive
+
+# Show available models
+python standalone_test.py --list-models
 
 # Unit tests with pytest
 pytest tests/test_api.py
@@ -55,7 +64,7 @@ pytest tests/test_api.py
 
 ### Model Management
 
-The first request to `/api/v1/generate` will automatically download and cache DistilGPT-2 (~82MB) to `./models/`. To preload the model on server startup, uncomment the model loading lines in the lifespan function in `app/main.py`.
+The first request to `/api/v1/generate` will automatically download and cache GPT-2 (~124MB) to `./models/`. To preload the model on server startup, uncomment the model loading lines in the lifespan function in `app/main.py`.
 
 Use `/api/v1/load-model` endpoint to explicitly load the model without text generation.
 
@@ -63,7 +72,7 @@ Use `/api/v1/load-model` endpoint to explicitly load the model without text gene
 
 Settings are managed through `app/core/config.py` and can be overridden via environment variables with `LLM_` prefix:
 
-- `LLM_MODEL_NAME`: Model to use (default: "distilgpt2")
+- `LLM_MODEL_NAME`: Model to use (default: "gpt2")
 - `LLM_DEVICE`: "cpu" or "cuda" (default: "cpu")  
 - `LLM_MODEL_CACHE_DIR`: Model cache directory (default: "./models")
 - `LLM_LOG_LEVEL`: Logging level (default: "INFO")

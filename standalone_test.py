@@ -2,6 +2,7 @@
 Standalone test script for direct model testing without API server
 """
 
+import argparse
 import asyncio
 import os
 import sys
@@ -10,14 +11,26 @@ import time
 # Add the app directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), "."))
 
+from app.core.config import settings
 from app.core.logging import setup_logging
-from app.models.model_manager import model_manager
+from app.models.model_manager import ModelManager
 
 # Setup logging
 setup_logging()
 
 
-async def test_standalone_model():
+def create_model_manager(model_name: str = None) -> ModelManager:
+    """Create a model manager with optional custom model name"""
+    if model_name:
+        # Override the settings for this session
+        settings.model_name = model_name
+        print(f"🔧 Using custom model: {model_name}")
+    
+    # Create a new model manager instance
+    return ModelManager()
+
+
+async def test_standalone_model(model_manager: ModelManager):
     """Test the model directly without the API server"""
 
     print("🤖 LLM Standalone Model Test")
@@ -145,7 +158,7 @@ async def test_standalone_model():
         return False
 
 
-async def interactive_standalone():
+async def interactive_standalone(model_manager: ModelManager):
     """Interactive mode for direct model testing"""
 
     print("\n🎮 Interactive Standalone Mode")
@@ -197,24 +210,111 @@ async def interactive_standalone():
     print("\n👋 Goodbye!")
 
 
-async def main():
-    """Main function"""
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="LLM Standalone Model Tester",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python standalone_test.py                              # Use default model (gpt2)
+  python standalone_test.py --model distilgpt2          # Use DistilGPT-2
+  python standalone_test.py --model gpt2-medium         # Use GPT-2 Medium
+  python standalone_test.py --model EleutherAI/gpt-neo-125M  # Use GPT-Neo
+  python standalone_test.py --interactive               # Interactive mode
+  python standalone_test.py --model gpt2-large --interactive  # Custom model + interactive
 
+Popular Models:
+  - gpt2 (default): 124M parameters, ~500MB
+  - gpt2-medium: 355M parameters, ~1.4GB  
+  - gpt2-large: 774M parameters, ~3GB
+  - gpt2-xl: 1.5B parameters, ~6GB
+  - distilgpt2: 82M parameters, ~350MB (faster, lower quality)
+  - EleutherAI/gpt-neo-125M: 125M parameters, ~500MB
+  - EleutherAI/gpt-neo-1.3B: 1.3B parameters, ~5GB
+        """
+    )
+    
+    parser.add_argument(
+        "--model", "-m",
+        type=str,
+        help="Hugging Face model name to use (default: from config)"
+    )
+    
+    parser.add_argument(
+        "--interactive", "-i",
+        action="store_true",
+        help="Run in interactive mode"
+    )
+    
+    parser.add_argument(
+        "--list-models",
+        action="store_true", 
+        help="Show popular model options and exit"
+    )
+    
+    return parser.parse_args()
+
+
+def show_popular_models():
+    """Show popular model options"""
+    print("🤖 Popular LLM Models for Local Inference:")
+    print("=" * 50)
+    
+    models = [
+        ("gpt2", "124M", "~500MB", "Good balance of speed and quality"),
+        ("gpt2-medium", "355M", "~1.4GB", "Better quality, slower"),
+        ("gpt2-large", "774M", "~3GB", "High quality, requires more memory"),
+        ("gpt2-xl", "1.5B", "~6GB", "Highest quality, very slow"),
+        ("distilgpt2", "82M", "~350MB", "Fastest, lower quality"),
+        ("EleutherAI/gpt-neo-125M", "125M", "~500MB", "GPT-3 alternative, similar to gpt2"),
+        ("EleutherAI/gpt-neo-1.3B", "1.3B", "~5GB", "Large GPT-3 alternative"),
+        ("EleutherAI/gpt-neo-2.7B", "2.7B", "~11GB", "Very large, high quality"),
+    ]
+    
+    print(f"{'Model Name':<25} {'Params':<8} {'Size':<8} {'Description'}")
+    print("-" * 70)
+    for name, params, size, desc in models:
+        print(f"{name:<25} {params:<8} {size:<8} {desc}")
+    
+    print("\n💡 Usage: python standalone_test.py --model <model_name>")
+
+
+async def main():
+    """Main function with command line argument support"""
+    
+    args = parse_arguments()
+    
+    # Handle --list-models flag
+    if args.list_models:
+        show_popular_models()
+        return
+    
+    # Show header
     print("LLM Standalone Model Tester")
     print("=" * 30)
-
-    import sys
-
-    if len(sys.argv) > 1 and sys.argv[1] == "--interactive":
-        await interactive_standalone()
-    else:
-        success = await test_standalone_model()
-
-        if success:
-            print("\n🎮 Run with --interactive flag for interactive mode")
-            print("💡 This test bypasses the API server and calls the model directly")
-
-        return success
+    
+    # Create model manager with optional custom model
+    model_manager = create_model_manager(args.model)
+    
+    try:
+        if args.interactive:
+            await interactive_standalone(model_manager)
+        else:
+            success = await test_standalone_model(model_manager)
+            
+            if success:
+                print("\n🎮 Available options:")
+                print("  --interactive         Interactive mode")
+                print("  --model <name>       Use different model")
+                print("  --list-models        Show popular models")
+                print("💡 This test bypasses the API server and calls the model directly")
+            
+            return success
+            
+    except KeyboardInterrupt:
+        print("\n👋 Test interrupted by user")
+        return False
 
 
 if __name__ == "__main__":

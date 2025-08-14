@@ -22,12 +22,12 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Model Configuration
-    model_name: str = "distilgpt2"  # Using DistilGPT-2 as lightweight option
+    model_name: str = "gpt2"  # GPT-2 (closest open alternative to GPT-3)
     model_cache_dir: Optional[str] = "./models"
-    max_model_length: int = 512
+    max_model_length: int = 1024  # GPT-2 supports up to 1024 tokens
 
     # Generation Defaults
-    default_max_length: int = 100
+    default_max_length: int = 150  # Increased for GPT-2's capabilities
     default_temperature: float = 0.7
     default_top_p: float = 0.9
     default_top_k: int = 50
