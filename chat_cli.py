@@ -469,8 +469,37 @@ async def main():
         await chat.run()
 
 
+def run_chat():
+    """Main entry point that handles event loop detection"""
+    try:
+        # Try to get the current event loop
+        asyncio.get_running_loop()
+        # If we get here, there's already a running loop
+        console.print("[red]❌ Cannot start chat interface from within an async environment")
+        console.print("")
+        console.print("[yellow]💡 Solutions:")
+        console.print("[cyan]   1. Run from a regular terminal: python chat_cli.py")
+        console.print("[cyan]   2. Or use the API directly: curl http://localhost:8000/api/v1/chat/new")
+        console.print("[cyan]   3. Or try the web docs: http://localhost:8000/docs")
+        console.print("")
+        console.print("[dim]Current working directory:", Path.cwd())
+        return False
+        
+    except RuntimeError:
+        # No running loop, safe to use asyncio.run()
+        try:
+            asyncio.run(main())
+            return True
+        except Exception as e:
+            console.print(f"[red]❌ Error starting chat: {e}")
+            return False
+
+
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        run_chat()
     except KeyboardInterrupt:
         console.print("\n[blue]👋 Goodbye![/blue]")
+    except Exception as e:
+        console.print(f"[red]❌ Unexpected error: {e}")
+        console.print("[yellow]💡 Try running from a regular terminal:")
