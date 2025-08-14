@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Model Configuration
-    current_model: str = "llama3-1b"  # Current active model profile
+    current_model: str = "llama3-1b"  # Now using DialoGPT (no auth required)
     model_cache_dir: Optional[str] = "./models"
     
     # Chat Configuration
@@ -92,27 +92,27 @@ MODEL_PROFILES: Dict[str, ModelProfile] = {
     ),
     
     "llama3-1b": ModelProfile(
-        name="Llama 3.2 1B Instruct",
-        model_id="meta-llama/Llama-3.2-1B-Instruct",
-        max_length=8192,
-        chat_template="llama3",
+        name="DialoGPT Medium (Chat)",
+        model_id="microsoft/DialoGPT-medium",
+        max_length=1024,
+        chat_template="dialogpt",
         supports_chat=True,
-        memory_gb=4.0,
-        description="Meta Llama 3.2 1B - Optimized for chat",
-        default_temperature=0.6,
-        default_max_tokens=200
+        memory_gb=2.0,
+        description="Microsoft DialoGPT Medium - Conversational AI",
+        default_temperature=0.7,
+        default_max_tokens=150
     ),
     
     "llama3-3b": ModelProfile(
-        name="Llama 3.2 3B Instruct",
-        model_id="meta-llama/Llama-3.2-3B-Instruct",
-        max_length=8192,
-        chat_template="llama3",
+        name="GPT-2 Large (Chat Mode)",
+        model_id="gpt2-large",
+        max_length=1024,
+        chat_template="gpt2",
         supports_chat=True,
-        memory_gb=8.0,
-        description="Meta Llama 3.2 3B - High quality chat",
-        default_temperature=0.6,
-        default_max_tokens=200
+        memory_gb=3.0,
+        description="GPT-2 Large configured for chat",
+        default_temperature=0.7,
+        default_max_tokens=150
     ),
     
     "distilgpt2": ModelProfile(
@@ -136,6 +136,16 @@ CHAT_TEMPLATES: Dict[str, str] = {
 {{ message['content'] }}<|eot_id|>{% endfor %}{% if add_generation_prompt %}<|start_header_id|>assistant<|end_header_id|>
 
 {% endif %}""",
+
+    "dialogpt": """{% for message in messages %}{% if message['role'] == 'user' %}{{ message['content'] }}{% if not loop.last %}<|endoftext|>{% endif %}{% elif message['role'] == 'assistant' %}{{ message['content'] }}{% if not loop.last %}<|endoftext|>{% endif %}{% endif %}{% endfor %}{% if add_generation_prompt %}<|endoftext|>{% endif %}""",
+    
+    "gpt2": """{% for message in messages %}{% if message['role'] == 'system' %}{{ message['content'] }}
+
+{% elif message['role'] == 'user' %}Human: {{ message['content'] }}
+
+{% elif message['role'] == 'assistant' %}AI: {{ message['content'] }}
+
+{% endif %}{% endfor %}{% if add_generation_prompt %}AI: {% endif %}""",
     
     "default": """{% for message in messages %}{% if message['role'] == 'system' %}System: {{ message['content'] }}
 {% elif message['role'] == 'user' %}Human: {{ message['content'] }}
