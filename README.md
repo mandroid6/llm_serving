@@ -92,7 +92,7 @@ Welcome to LLM Chat Interface!
 Current model: llama3-1b
 
 You: Hello! Can you help me write a Python function?
-Assistant: Of course! I'd be happy to help you write a Python function. 
+Assistant: Of course! I'd be happy to help you write a Python function.
 What specific functionality would you like the function to have?
 
 You: A function that calculates the factorial of a number
@@ -143,7 +143,7 @@ You: Hello! Can you help me write a Python function?
 Assistant: Hello! I'd be happy to help you write a Python function. Could you tell me what specific functionality you need? For example:
 
 - Mathematical calculations
-- Data processing 
+- Data processing
 - File operations
 - Web scraping
 - API interactions
@@ -181,7 +181,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 **💾 Memory Requirements by Model**
 - **qwen3-1.8b**: 6GB RAM (or 4GB VRAM)
-- **qwen3-3b**: 8GB RAM (or 6GB VRAM) 
+- **qwen3-3b**: 8GB RAM (or 6GB VRAM)
 - **qwen3-7b**: 16GB RAM (or 8GB VRAM) ⚡ **GPU Recommended**
 - **qwen3-14b**: 32GB RAM (or 16GB VRAM) 🚨 **GPU Required**
 
@@ -249,7 +249,7 @@ curl -X POST "http://localhost:8000/api/v1/chat/switch-model" \
 Environment variables with `LLM_` prefix:
 
 - `LLM_MODEL_NAME`: Default model (default: "llama3-1b")
-- `LLM_DEVICE`: "cpu" or "cuda" (default: "cpu")  
+- `LLM_DEVICE`: "cpu" or "cuda" (default: "cpu")
 - `LLM_MODEL_CACHE_DIR`: Model cache directory (default: "./models")
 - `LLM_LOG_LEVEL`: Logging level (default: "INFO")
 - `LLM_MAX_CONVERSATION_LENGTH`: Max conversation turns (default: 50)
@@ -289,11 +289,11 @@ python standalone_test.py --model llama3-1b
 
 # Interactive mode
 python standalone_test.py --interactive
-
+```
 
 ## Project Structure
 
-```
+```text
 llm_serving/
 ├── README.md               # This file
 ├── CLAUDE.md              # Development guidelines
