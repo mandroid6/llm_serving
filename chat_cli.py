@@ -6,6 +6,7 @@ Command-line chat interface for the LLM Serving API with Llama3 support
 import asyncio
 import json
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -29,11 +30,13 @@ from prompt_toolkit.shortcuts import confirm
 # Voice input support (optional)
 try:
     from app.voice import VoiceInputManager, VoiceInputMode
+    from app.core.config import settings
     VOICE_AVAILABLE = True
 except ImportError:
     VOICE_AVAILABLE = False
     VoiceInputManager = None
     VoiceInputMode = None
+    settings = None
 
 # Configuration
 DEFAULT_API_URL = "http://localhost:8000"
@@ -158,7 +161,30 @@ class ChatInterface:
         # Initialize voice input if available
         if VOICE_AVAILABLE:
             try:
-                self.voice_manager = VoiceInputManager()
+                # Check if voice input is enabled in config
+                voice_enabled_in_config = True
+                if settings and hasattr(settings, 'voice'):
+                    voice_enabled_in_config = settings.voice.enabled
+                
+                if not voice_enabled_in_config:
+                    console.print("[dim]Voice input disabled in configuration[/dim]")
+                    self.voice_enabled = False
+                    return
+                
+                # Use settings from config if available
+                voice_config = {}
+                if settings and hasattr(settings, 'voice'):
+                    voice_config = {
+                        'whisper_model': settings.voice.whisper_model,
+                        'language': settings.voice.language,
+                        'sample_rate': settings.voice.sample_rate,
+                        'silence_threshold': settings.voice.silence_threshold,
+                        'silence_duration': settings.voice.silence_duration,
+                        'max_recording_time': settings.voice.max_recording_time,
+                        'device_index': settings.voice.device_index
+                    }
+                
+                self.voice_manager = VoiceInputManager(**voice_config)
                 self.voice_enabled = True
             except Exception as e:
                 console.print(f"[yellow]⚠️ Voice input not available: {e}")
@@ -403,24 +429,58 @@ class ChatInterface:
         ).strip()
     
     async def get_voice_input(self) -> Optional[str]:
-        """Get voice input from user"""
+        """Get voice input from user with real-time feedback"""
         if not self.voice_enabled or not self.voice_manager:
             console.print("[red]❌ Voice input not available")
             return None
         
         try:
-            # Show recording interface
+            # Show recording interface with enhanced feedback
             console.print("[bold green]🎤 Recording... (speak now, will auto-stop on silence)[/bold green]")
+            console.print("[dim]Press Ctrl+C to cancel recording[/dim]")
             
-            with Live(
-                Spinner("dots", text="[dim]🎤 Listening..."), 
-                console=console, 
+            # Create a more interactive recording display
+            from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+            
+            with Progress(
+                TextColumn("[bold blue]🎤 Recording"),
+                BarColumn(bar_width=40, style="green", complete_style="green"),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TimeRemainingColumn(),
+                console=console,
                 transient=True
-            ) as live:
-                # Record voice input
-                text = await self.voice_manager.get_voice_input(
-                    mode=VoiceInputMode.AUTO_STOP
+            ) as progress:
+                
+                # Add progress task
+                recording_task = progress.add_task(
+                    "Recording audio...", 
+                    total=self.voice_manager.max_recording_time
                 )
+                
+                # Start recording with progress updates
+                start_time = time.time()
+                
+                # Create a custom recording method with progress
+                recording_future = asyncio.create_task(
+                    self.voice_manager.get_voice_input(mode=VoiceInputMode.AUTO_STOP)
+                )
+                
+                # Update progress while recording
+                while not recording_future.done():
+                    elapsed = time.time() - start_time
+                    progress.update(recording_task, completed=elapsed)
+                    
+                    # Show audio level if available
+                    try:
+                        level = self.voice_manager.get_current_audio_level()
+                        level_bars = self._get_audio_level_bars(level)
+                        progress.update(recording_task, description=f"🎤 Recording {level_bars}")
+                    except:
+                        pass
+                    
+                    await asyncio.sleep(0.1)
+                
+                text = await recording_future
             
             if text:
                 console.print(f"[dim]📝 Transcribed: {text}[/dim]")
@@ -429,9 +489,33 @@ class ChatInterface:
                 console.print("[yellow]⚠️ No speech detected or transcription failed")
                 return None
                 
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Recording cancelled[/yellow]")
+            self.voice_manager.stop_recording()
+            return None
         except Exception as e:
             console.print(f"[red]❌ Voice input error: {e}")
             return None
+    
+    def _get_audio_level_bars(self, level: float) -> str:
+        """Create audio level visualization bars"""
+        # Normalize level to 0-1 range
+        level = max(0.0, min(1.0, level))
+        
+        # Create bar visualization
+        bar_length = 10
+        filled_bars = int(level * bar_length)
+        empty_bars = bar_length - filled_bars
+        
+        if level > 0.7:
+            color = "red"
+        elif level > 0.4:
+            color = "yellow"
+        else:
+            color = "green"
+        
+        bars = f"[{color}]{'█' * filled_bars}[/]{color}]{'░' * empty_bars}"
+        return f"{bars} {level*100:.0f}%"
     
     async def toggle_voice_mode(self):
         """Toggle between text and voice input modes"""
@@ -452,15 +536,44 @@ class ChatInterface:
         
         try:
             console.print("[bold green]🎤 Recording voice message... (speak now, will auto-stop on silence)[/bold green]")
+            console.print("[dim]Press Ctrl+C to cancel recording[/dim]")
             
-            with Live(
-                Spinner("dots", text="[dim]🎤 Listening..."), 
-                console=console, 
+            # Use the same enhanced recording interface
+            from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+            
+            with Progress(
+                TextColumn("[bold blue]🎤 Voice Message"),
+                BarColumn(bar_width=40, style="green", complete_style="green"),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TimeRemainingColumn(),
+                console=console,
                 transient=True
-            ) as live:
-                text = await self.voice_manager.get_voice_input(
-                    mode=VoiceInputMode.AUTO_STOP
+            ) as progress:
+                
+                recording_task = progress.add_task(
+                    "Recording...", 
+                    total=self.voice_manager.max_recording_time
                 )
+                
+                start_time = time.time()
+                recording_future = asyncio.create_task(
+                    self.voice_manager.get_voice_input(mode=VoiceInputMode.AUTO_STOP)
+                )
+                
+                while not recording_future.done():
+                    elapsed = time.time() - start_time
+                    progress.update(recording_task, completed=elapsed)
+                    
+                    try:
+                        level = self.voice_manager.get_current_audio_level()
+                        level_bars = self._get_audio_level_bars(level)
+                        progress.update(recording_task, description=f"🎤 Voice Message {level_bars}")
+                    except:
+                        pass
+                    
+                    await asyncio.sleep(0.1)
+                
+                text = await recording_future
             
             if text:
                 console.print(f"[dim]📝 Transcribed: {text}[/dim]")
@@ -468,6 +581,9 @@ class ChatInterface:
             else:
                 console.print("[yellow]⚠️ No speech detected or transcription failed")
                 
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Recording cancelled[/yellow]")
+            self.voice_manager.stop_recording()
         except Exception as e:
             console.print(f"[red]❌ Voice recording error: {e}")
     
@@ -479,15 +595,47 @@ class ChatInterface:
         
         status = self.voice_manager.get_status()
         
+        # Create a more detailed status display
+        whisper_models = self.voice_manager.get_whisper_models()
+        current_model = status.get('whisper_model', 'N/A')
+        model_description = whisper_models.get(current_model, 'Unknown model')
+        
+        devices = self.voice_manager.get_audio_devices()
+        current_device_index = status.get('device_index')
+        current_device_name = "Default"
+        
+        if current_device_index is not None:
+            for device in devices:
+                if device['index'] == current_device_index:
+                    current_device_name = device['name']
+                    break
+        
+        # Voice mode status
+        mode_status = "[green]Voice mode[/green]" if self.voice_mode else "[dim]Text mode[/dim]"
+        
         settings_text = f"""
 [bold]🎤 Voice Input Settings[/bold]
 
-[bold]Status:[/bold]
+[bold]Current Status:[/bold]
+• Input mode: {mode_status}
 • Voice input: [green]{'Enabled' if status['is_enabled'] else 'Disabled'}[/green]
-• Current mode: [cyan]{status.get('current_mode', 'N/A')}[/cyan]
-• Whisper model: [cyan]{status.get('whisper_model', 'N/A')}[/cyan]
-• Language: [cyan]{status.get('language', 'N/A')}[/cyan]
-• Audio devices: [cyan]{status.get('audio_devices_count', 0)}[/cyan]
+• Recording: [red]{'Active' if status['is_recording'] else 'Idle'}[/red]
+
+[bold]Whisper Configuration:[/bold]
+• Model: [cyan]{current_model}[/cyan] - {model_description}
+• Language: [cyan]{status.get('language', 'auto-detect')}[/cyan]
+• Model loaded: [green]{'Yes' if status.get('whisper_loaded') else 'No'}[/green]
+
+[bold]Audio Configuration:[/bold]
+• Device: [cyan]{current_device_name}[/cyan] (Index: {current_device_index or 'default'})
+• Available devices: [cyan]{status.get('audio_devices_count', 0)}[/cyan]
+• Sample rate: [cyan]16 kHz[/cyan]
+• Channels: [cyan]Mono[/cyan]
+
+[bold]Recording Settings:[/bold]
+• Auto-stop on silence: [cyan]{settings.voice.silence_duration}s[/cyan]
+• Max recording time: [cyan]{settings.voice.max_recording_time}s[/cyan]
+• Silence threshold: [cyan]{settings.voice.silence_threshold}[/cyan]
 
 [bold]Available Commands:[/bold]
 • [cyan]/voice[/cyan] - Toggle voice input mode
@@ -495,10 +643,12 @@ class ChatInterface:
 • [cyan]/devices[/cyan] - List audio devices
 • [cyan]/voice-settings[/cyan] - Show this settings panel
 
-[bold]💡 Tips:[/bold]
+[bold]💡 Voice Input Tips:[/bold]
+• Speak clearly after the recording starts
 • Voice mode auto-stops on silence
-• Transcription happens locally with Whisper
-• Works offline (no internet required)
+• All transcription happens locally (offline)
+• Use /devices to see available microphones
+• Try different Whisper models for better accuracy
         """
         
         console.print(Panel(settings_text, title="🎤 Voice Settings", border_style="green"))

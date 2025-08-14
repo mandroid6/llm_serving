@@ -37,6 +37,26 @@ class ChatSettings(BaseModel):
     show_typing_indicator: bool = True
 
 
+class VoiceSettings(BaseModel):
+    """Voice input configuration"""
+    enabled: bool = True
+    whisper_model: str = "base"  # tiny, base, small, medium, large
+    language: Optional[str] = None  # None for auto-detection
+    sample_rate: int = 16000
+    silence_threshold: float = 0.01  # Audio level threshold for silence detection
+    silence_duration: float = 2.0   # Seconds of silence before auto-stop
+    max_recording_time: int = 60     # Maximum recording duration in seconds
+    device_index: Optional[int] = None  # Specific audio device index (None for default)
+    
+    # Generation settings for voice input
+    chunk_size: int = 1024  # Audio chunk size for processing
+    channels: int = 1       # Audio channels (1 = mono)
+    
+    # UI settings
+    show_transcription: bool = True    # Show transcribed text before sending
+    auto_send_transcription: bool = True  # Automatically send transcribed text
+
+
 class Settings(BaseSettings):
     """Application settings with chat support"""
 
@@ -61,6 +81,9 @@ class Settings(BaseSettings):
     
     # Chat settings (for backward compatibility)
     chat: ChatSettings = Field(default_factory=ChatSettings)
+    
+    # Voice input settings
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
 
     # Performance Settings
     torch_threads: int = 1
