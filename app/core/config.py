@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Model Configuration
-    current_model: str = "gpt2"  # Current active model profile
+    current_model: str = "llama3-1b"  # Current active model profile
     model_cache_dir: Optional[str] = "./models"
     
     # Chat Configuration

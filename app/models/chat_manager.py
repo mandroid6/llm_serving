@@ -201,7 +201,7 @@ class ChatModelManager:
         top_p: float = None,
         top_k: int = None,
         stream: bool = False
-    ):
+    ) -> Dict[str, Any]:
         """Generate chat response for a conversation"""
         
         if not self.is_loaded:
@@ -225,8 +225,8 @@ class ChatModelManager:
             response_text = result["generated_text"][0]
             conversation.add_assistant_message(response_text)
             
-            # Yield the result instead of returning it
-            yield {
+            # Return the result directly
+            return {
                 "response": response_text,
                 "conversation": conversation,
                 "generation_time": result["generation_time"],
@@ -234,7 +234,6 @@ class ChatModelManager:
                 "parameters": result["parameters"],
                 "finished": True
             }
-            return
         
         start_time = time.time()
         
@@ -281,63 +280,39 @@ class ChatModelManager:
                 use_cache=True
             )
             
-            if stream:
-                # Streaming generation
-                response_text = ""
-                async for chunk in self._generate_stream(inputs, generation_config):
-                    response_text += chunk
-                    yield {
-                        "chunk": chunk,
-                        "partial_response": response_text,
-                        "finished": False
-                    }
-                
-                # Final response
-                conversation.add_assistant_message(response_text)
-                generation_time = time.time() - start_time
-                
-                yield {
-                    "chunk": "",
-                    "response": response_text,
-                    "conversation": conversation,
-                    "generation_time": generation_time,
-                    "model_name": self.profile.name,
-                    "finished": True
-                }
-            else:
-                # Non-streaming generation
-                with torch.no_grad():
-                    outputs = self.model.generate(
-                        inputs.input_ids,
-                        attention_mask=inputs.attention_mask,
-                        generation_config=generation_config
-                    )
-                
-                # Decode response
-                generated_tokens = outputs[0][inputs.input_ids.shape[1]:]
-                response_text = self.tokenizer.decode(
-                    generated_tokens,
-                    skip_special_tokens=True
+            # Non-streaming generation for now (to avoid async generator issues)
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    inputs.input_ids,
+                    attention_mask=inputs.attention_mask,
+                    generation_config=generation_config
                 )
-                
-                # Add to conversation
-                conversation.add_assistant_message(response_text)
-                generation_time = time.time() - start_time
-                
-                # Yield the result instead of returning it
-                yield {
-                    "response": response_text,
-                    "conversation": conversation,
-                    "generation_time": generation_time,
-                    "model_name": self.profile.name,
-                    "parameters": {
-                        "max_tokens": max_tokens,
-                        "temperature": temperature,
-                        "top_p": top_p,
-                        "top_k": top_k
-                    },
-                    "finished": True
-                }
+            
+            # Decode response
+            generated_tokens = outputs[0][inputs.input_ids.shape[1]:]
+            response_text = self.tokenizer.decode(
+                generated_tokens,
+                skip_special_tokens=True
+            )
+            
+            # Add to conversation
+            conversation.add_assistant_message(response_text)
+            generation_time = time.time() - start_time
+            
+            # Return the result directly
+            return {
+                "response": response_text,
+                "conversation": conversation,
+                "generation_time": generation_time,
+                "model_name": self.profile.name,
+                "parameters": {
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "top_k": top_k
+                },
+                "finished": True
+            }
                 
         except Exception as e:
             logger.error(f"Chat generation failed: {str(e)}")
