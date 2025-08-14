@@ -1,23 +1,28 @@
-# LLM Serving API with Chat Interface
+# LLM Serving API with Chat Interface & Voice Input
 
 ## Overview
-A production-ready LLM serving API built with FastAPI that supports both GPT-2 and Llama3 models with an interactive chat interface. Features include conversational AI, model switching, conversation management, and a rich command-line chat experience.
+A production-ready LLM serving API built with FastAPI that supports multiple LLM models with an interactive chat interface featuring **voice input capabilities**. Experience conversational AI with speech-to-text integration, model switching, conversation management, and a rich command-line chat experience.
 
-## Features
-- 🤖 **Multiple Models**: GPT-2, GPT-2 Medium, Qwen3 1.8B, Qwen3 3B, Llama3 models, DistilGPT2
-- 💬 **Chat Interface**: Interactive CLI with rich formatting and commands
-- 🔄 **Model Switching**: Switch between models during conversations
-- 💾 **Conversation Management**: Save and load chat histories
+## 🌟 Key Features
+- 🤖 **Multiple LLM Models**: GPT-2, GPT-2 Medium, Qwen3 1.8B/3B/7B/14B, Llama3 models, DistilGPT2
+- 🎤 **Voice Input**: Speech-to-text with OpenAI Whisper (100% offline, no API keys required)
+- 💬 **Interactive Chat**: Rich CLI with real-time voice transcription and text input
+- 🔄 **Live Model Switching**: Switch between models during conversations
+- 💾 **Conversation Management**: Save and load chat histories with voice transcriptions
 - 🚀 **Fast API**: Async FastAPI server with comprehensive REST endpoints
-- 🧠 **Context Awareness**: Maintains conversation history and context
-- 🎨 **Rich CLI**: Beautiful terminal interface with colors and formatting
+- 🧠 **Context Awareness**: Maintains conversation history and context across input modes
+- 🎨 **Rich UI**: Beautiful terminal interface with audio level visualization
+- 🌍 **Multilingual**: Support for 99+ languages via Whisper auto-detection
+- 🔒 **Privacy-First**: All voice processing happens locally (no cloud dependencies)
 
 ## Technical Stack
 - **Framework**: FastAPI (async API server)
-- **Models**: Hugging Face Transformers (GPT-2, Meta Llama3)
-- **Chat System**: Custom conversation management with context
-- **CLI**: Rich + prompt-toolkit for interactive experience
-- **Runtime**: PyTorch with CPU/GPU support
+- **LLM Models**: Hugging Face Transformers (GPT-2, Qwen3, Meta Llama3)
+- **Speech-to-Text**: OpenAI Whisper (local inference, no API required)
+- **Audio Processing**: PyAudio + PortAudio (cross-platform audio capture)
+- **Chat System**: Custom conversation management with voice transcription support
+- **CLI Interface**: Rich + prompt-toolkit with real-time audio visualization
+- **Runtime**: PyTorch with CPU/GPU support + FFmpeg for audio processing
 - **Validation**: Pydantic schemas and request validation
 
 ## Installation & Setup
@@ -37,10 +42,11 @@ cd llm_serving
 
 The setup script will:
 - ✅ Check Python 3.8+ installation
+- 🍎 **Auto-install voice dependencies** (macOS: FFmpeg + PortAudio via Homebrew)
 - 🐍 Create a virtual environment (`./venv`)
-- 📦 Install all dependencies from requirements.txt
+- 📦 Install all dependencies (including voice support: Whisper + PyAudio)
 - 📁 Create required directories (`models`, `conversations`, `logs`)
-- ⚙️ Create default `.env` configuration file
+- ⚙️ Create default `.env` configuration file with voice settings
 - 🖥️ Check for GPU support and provide optimization tips
 
 **After setup completion:**
@@ -83,9 +89,26 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ### 📋 Requirements
 
 - **Python**: 3.8 or higher
-- **Memory**: 2GB+ RAM (4GB+ recommended for larger models)
+- **Memory**: 2GB+ RAM (6GB+ recommended for Qwen models with voice processing)
 - **Storage**: 5GB+ free space for model downloads
+- **Audio**: Microphone for voice input (optional)
 - **GPU** (optional): NVIDIA GPU with CUDA for acceleration
+
+**Voice Input Dependencies (automatically installed on macOS):**
+- **FFmpeg**: For audio processing (Whisper requirement)
+- **PortAudio**: For microphone access (PyAudio requirement)
+
+**Manual installation for other platforms:**
+```bash
+# Ubuntu/Debian
+sudo apt update && sudo apt install ffmpeg portaudio19-dev python3-dev
+
+# CentOS/RHEL/Fedora  
+sudo dnf install ffmpeg portaudio-devel python3-devel
+
+# Windows (via conda)
+conda install ffmpeg portaudio
+```
 
 ## Quick Start
 
@@ -99,10 +122,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 # Switch to Qwen model 
 /switch qwen3-1.8b
 
-# Start chatting
+# 🎤 VOICE COMMANDS
+/voice          # Toggle voice input mode (text ⇄ voice)
+/record         # Record a single voice message
+/voice-settings # View voice configuration & status
+/devices        # List available audio input devices
+
+# Regular chat (text or voice depending on mode)
 Hello, how are you today?
 
-# Save conversation
+# Save conversation (includes voice transcriptions)
 /save my_conversation
 
 # Load previous conversation
@@ -135,6 +164,185 @@ Hello, how are you today?
 | `qwen3-14b` | ~28GB | ~32GB | 32768 | 🏆 **Enterprise-grade AI** |
 
 **💡 Tip**: Qwen models offer superior performance but require more memory. Start with `qwen3-1.8b` for the best balance of quality and resource usage.
+
+## 🎤 Voice Input Capabilities
+
+### Overview
+Experience seamless voice-to-text interaction powered by **OpenAI Whisper** running completely offline. No API keys, no cloud dependencies, no data leaving your machine.
+
+### ✨ Voice Features
+- 🎯 **Local Processing**: 100% offline speech recognition using OpenAI Whisper
+- 🌍 **99+ Languages**: Auto-detection or manual language selection
+- 🔄 **Dual Input Modes**: Switch between text and voice input anytime
+- 📊 **Real-time Feedback**: Live audio level visualization during recording
+- 🛑 **Smart Auto-stop**: Automatically stops recording on silence detection
+- 💾 **Conversation Integration**: Voice transcriptions saved with chat history
+- ⚙️ **Configurable**: Multiple Whisper models and audio settings
+
+### Voice Models Available
+| Whisper Model | Size | Speed | Accuracy | Best For |
+|---------------|------|-------|----------|----------|
+| `tiny` | ~39MB | ⚡⚡⚡ | ⭐⭐ | Testing, very fast |
+| `base` | ~74MB | ⚡⚡ | ⭐⭐⭐ | ✅ **Default - good balance** |
+| `small` | ~244MB | ⚡ | ⭐⭐⭐⭐ | Better accuracy |
+| `medium` | ~769MB | 🐌 | ⭐⭐⭐⭐⭐ | High accuracy |
+| `large` | ~1550MB | 🐌🐌 | ⭐⭐⭐⭐⭐ | Best accuracy |
+
+### Voice Commands
+```bash
+/voice          # Toggle between text ⇄ voice input
+/record         # Record a single voice message
+/voice-settings # View detailed voice configuration
+/devices        # List available microphones
+```
+
+### Voice Usage Examples
+
+#### Basic Voice Chat
+```bash
+💬 You: /voice
+✅ Switched to voice input mode 🎤
+
+🎤 Recording... (speak now, will auto-stop on silence)
+📝 Transcribed: Hello, can you help me write a Python function?
+
+🤖 Assistant: Of course! I'd be happy to help you write a Python function. What specific functionality would you like the function to have?
+
+🎤 Recording... (speak now, will auto-stop on silence)  
+📝 Transcribed: I need a function that calculates compound interest
+
+🤖 Assistant: Here's a Python function to calculate compound interest:
+[Response continues...]
+```
+
+#### Voice Settings Panel
+```bash
+💬 You: /voice-settings
+
+🎤 Voice Input Settings
+
+Current Status:
+• Input mode: Voice mode
+• Voice input: Enabled
+• Recording: Idle
+
+Whisper Configuration:
+• Model: base - ~74MB good balance of speed and accuracy
+• Language: auto-detect
+• Model loaded: Yes
+
+Audio Configuration:
+• Device: Built-in Microphone (Index: default)
+• Available devices: 3
+• Sample rate: 16 kHz
+• Channels: Mono
+
+Recording Settings:
+• Auto-stop on silence: 2.0s
+• Max recording time: 60s
+• Silence threshold: 0.01
+
+💡 Voice Input Tips:
+• Speak clearly after the recording starts
+• Voice mode auto-stops on silence
+• All transcription happens locally (offline)
+• Use /devices to see available microphones
+```
+
+#### Audio Device Selection
+```bash
+💬 You: /devices
+
+🎤 Audio Input Devices
+┏━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ Index ┃ Name                     ┃ Channels ┃ Sample Rate ┃ Status      ┃
+┡━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ 0     │ Built-in Microphone      │ 2        │ 44100 Hz    │ 👑 Current  │
+│ 1     │ USB Microphone           │ 1        │ 48000 Hz    │             │
+│ 2     │ AirPods Pro              │ 1        │ 16000 Hz    │             │
+└───────┴──────────────────────────┴──────────┴─────────────┴─────────────┘
+```
+
+### Voice Configuration
+
+#### Environment Variables
+```bash
+# Voice settings (automatically set by setup.sh)
+LLM_VOICE_ENABLED=true                    # Enable/disable voice input
+LLM_VOICE_WHISPER_MODEL=base             # Whisper model size
+LLM_VOICE_LANGUAGE=auto                  # Language (auto-detect or specific)
+LLM_VOICE_SUPPRESS_WARNINGS=true        # Hide technical warnings
+LLM_VOICE_SILENCE_DURATION=2.0          # Seconds of silence to auto-stop
+LLM_VOICE_MAX_RECORDING_TIME=60          # Maximum recording duration
+```
+
+#### Supported Languages (Auto-detected)
+Whisper supports **99+ languages** including:
+- **English** (en) - Excellent accuracy
+- **Spanish** (es) - Excelente precisión  
+- **French** (fr) - Excellente précision
+- **German** (de) - Ausgezeichnete Genauigkeit
+- **Chinese** (zh) - 出色的准确性
+- **Japanese** (ja) - 優れた精度
+- **Portuguese** (pt) - Excelente precisão
+- **Russian** (ru) - Отличная точность
+- **Arabic** (ar) - دقة ممتازة
+- And 90+ more languages automatically detected!
+
+### Voice Troubleshooting
+
+#### ❌ "Voice input not available"
+```bash
+# Check dependencies
+python -c "import pyaudio, whisper; print('✅ Voice dependencies OK')"
+
+# If pyaudio fails on macOS:
+brew install portaudio
+pip install pyaudio
+
+# If whisper fails:
+pip install openai-whisper
+
+# If ffmpeg missing:
+brew install ffmpeg  # macOS
+# sudo apt install ffmpeg  # Ubuntu
+```
+
+#### 🎤 No microphone detected
+```bash
+💬 You: /devices
+# If no devices shown, check:
+# 1. Microphone permissions (macOS System Preferences > Privacy)
+# 2. Try different audio device
+# 3. Restart application
+```
+
+#### 🔇 Poor transcription quality
+```bash
+# Switch to better Whisper model
+export LLM_VOICE_WHISPER_MODEL=small  # or medium/large
+
+# Or in chat:
+💬 You: /voice-settings
+# Check current model and consider upgrading
+```
+
+#### 🚨 High memory usage
+Voice processing memory requirements:
+- **Whisper tiny**: +200MB RAM
+- **Whisper base**: +400MB RAM  
+- **Whisper small**: +800MB RAM
+- **Whisper medium**: +2GB RAM
+- **Whisper large**: +4GB RAM
+
+**Optimization:**
+```bash
+# Use smaller Whisper model for low-memory systems
+export LLM_VOICE_WHISPER_MODEL=tiny
+
+# Disable voice if not needed
+export LLM_VOICE_ENABLED=false
+```
 
 ## Chat Interface Usage
 
@@ -302,18 +510,34 @@ curl -X POST "http://localhost:8000/api/v1/chat/switch-model" \
 
 Environment variables with `LLM_` prefix:
 
+**Core Settings:**
 - `LLM_MODEL_NAME`: Default model (default: "qwen3-1.8b")
 - `LLM_DEVICE`: "cpu" or "cuda" (default: "cpu")
 - `LLM_MODEL_CACHE_DIR`: Model cache directory (default: "./models")
 - `LLM_LOG_LEVEL`: Logging level (default: "INFO")
 - `LLM_MAX_CONVERSATION_LENGTH`: Max conversation turns (default: 50)
 
+**Voice Input Settings:**
+- `LLM_VOICE_ENABLED`: Enable voice input (default: true)
+- `LLM_VOICE_WHISPER_MODEL`: Whisper model size (default: "base")
+- `LLM_VOICE_LANGUAGE`: Language code or "auto" (default: auto-detect)
+- `LLM_VOICE_SUPPRESS_WARNINGS`: Hide Whisper warnings (default: true)
+- `LLM_VOICE_SILENCE_DURATION`: Auto-stop silence duration (default: 2.0)
+- `LLM_VOICE_MAX_RECORDING_TIME`: Max recording seconds (default: 60)
+
 Example `.env` file:
 ```bash
-LLM_MODEL_NAME=llama3-3b
+# Core configuration
+LLM_MODEL_NAME=qwen3-1.8b
 LLM_DEVICE=cuda
 LLM_MODEL_CACHE_DIR=/path/to/models
 LLM_LOG_LEVEL=DEBUG
+
+# Voice configuration
+LLM_VOICE_ENABLED=true
+LLM_VOICE_WHISPER_MODEL=small
+LLM_VOICE_LANGUAGE=en
+LLM_VOICE_SUPPRESS_WARNINGS=true
 ```
 
 ## Testing
@@ -349,12 +573,12 @@ python tests/standalone_test.py --interactive
 
 ```text
 llm_serving/
-├── README.md               # This file
-├── CLAUDE.md              # Development guidelines
+├── README.md               # This file - comprehensive documentation
+├── CLAUDE.md              # Development guidelines for contributors
 ├── LICENSE                # MIT License
-├── requirements.txt       # Python dependencies
-├── setup.sh               # Automated setup script
-├── chat_cli.py            # Interactive chat interface
+├── requirements.txt       # Python dependencies (includes voice support)
+├── setup.sh               # Automated setup script (installs voice deps)
+├── chat_cli.py            # Interactive chat interface with voice input
 ├── app/
 │   ├── __init__.py
 │   ├── main.py           # FastAPI application setup
@@ -363,20 +587,25 @@ llm_serving/
 │   │   └── endpoints.py  # API endpoint implementations
 │   ├── core/
 │   │   ├── __init__.py
-│   │   ├── config.py     # Configuration and model profiles
+│   │   ├── config.py     # Configuration and model profiles + voice settings
 │   │   └── logging.py    # Logging setup
-│   └── models/
-│       ├── __init__.py
-│       ├── chat_manager.py    # ChatModelManager for conversation AI
-│       ├── conversation.py    # Conversation and Message classes
-│       ├── model_manager.py   # Legacy ModelManager (GPT-2 only)
-│       └── schemas.py         # Pydantic request/response models
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── chat_manager.py    # ChatModelManager for conversation AI
+│   │   ├── conversation.py    # Conversation and Message classes
+│   │   ├── model_manager.py   # Legacy ModelManager (GPT-2 only)
+│   │   └── schemas.py         # Pydantic request/response models
+│   └── voice/               # 🎤 NEW: Voice input capabilities
+│       ├── __init__.py      # Voice module exports
+│       ├── recorder.py      # Audio recording with PyAudio + silence detection
+│       ├── transcriber.py   # Whisper speech-to-text processing
+│       └── manager.py       # VoiceInputManager orchestration
 └── tests/
     ├── __init__.py
     ├── client_test.py     # API client tests
     ├── standalone_test.py # Standalone model tests
     ├── test_api.py        # Basic API tests
-    └── test_chat.py       # Chat functionality tests
+    └── test_chat.py       # Chat functionality tests (includes voice)
 ```
 
 ## Troubleshooting
