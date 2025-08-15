@@ -419,7 +419,7 @@ class ChatInterface:
         """Get text input from user"""
         prompt_text = "💬 You: "
         if self.voice_enabled:
-            mode_indicator = " [green]🎤[/green]" if self.voice_mode else " [dim]⌨️[/dim]"
+            mode_indicator = " 🎤" if self.voice_mode else " ⌨️"
             prompt_text = f"💬 You{mode_indicator}: "
         
         return toolkit_prompt(
