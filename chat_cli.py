@@ -7,7 +7,6 @@ import asyncio
 import json
 import sys
 import time
-import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -27,15 +26,6 @@ from prompt_toolkit import prompt as toolkit_prompt
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import confirm
-
-# Keyboard detection for push-to-talk
-try:
-    import keyboard
-    KEYBOARD_AVAILABLE = True
-except ImportError:
-    KEYBOARD_AVAILABLE = False
-    console.print("[yellow]⚠️ 'keyboard' package not available. Install with: pip install keyboard")
-    console.print("[yellow]   Push-to-talk functionality will be limited.")
 
 # Voice input support (optional)
 try:
@@ -168,12 +158,6 @@ class ChatInterface:
         self.voice_enabled = False
         self.voice_mode = False  # Toggle between text and voice input
         
-        # Push-to-talk state tracking
-        self.space_pressed = False
-        self.space_press_time = None
-        self.recording_active = False
-        self.voice_recording_task = None
-        
         # Initialize voice input if available
         if VOICE_AVAILABLE:
             try:
@@ -245,15 +229,11 @@ class ChatInterface:
         voice_status = ""
         voice_commands = ""
         
-        if self.voice_enabled and KEYBOARD_AVAILABLE:
-            voice_status = "\n[green]🎤 Voice input enabled (Push-to-talk)[/green]"
-            voice_commands = """• [cyan]/voice[/cyan] - Toggle push-to-talk voice mode
+        if self.voice_enabled:
+            voice_status = "\n[green]🎤 Voice input enabled[/green]"
+            voice_commands = """• [cyan]/voice[/cyan] - Toggle voice input mode
 • [cyan]/record[/cyan] - Record a voice message
 • [cyan]/voice-settings[/cyan] - Voice configuration
-"""
-        elif self.voice_enabled:
-            voice_status = "\n[yellow]🎤 Voice input available (requires 'keyboard' package)[/yellow]"
-            voice_commands = """• [cyan]/help[/cyan] - See voice setup instructions
 """
         
         welcome_text = f"""
@@ -272,7 +252,7 @@ class ChatInterface:
 [bold]Current Model:[/bold] [green]{self.current_model}[/green]
 [bold]Chat Models:[/bold] {', '.join(self.chat_models)}
 
-[dim]Type your message and press Enter to chat!{' Or use /voice for push-to-talk mode!' if self.voice_enabled and KEYBOARD_AVAILABLE else ''}[/dim]
+[dim]Type your message and press Enter to chat!{' Or use /voice to enable voice input!' if self.voice_enabled else ''}[/dim]
         """
         
         console.print(Panel(welcome_text, title="🚀 Welcome", border_style="blue"))
@@ -431,7 +411,7 @@ class ChatInterface:
     async def get_user_input(self) -> Optional[str]:
         """Unified method to get user input (text or voice)"""
         if self.voice_mode and self.voice_enabled:
-            return await self.get_push_to_talk_input()
+            return await self.get_voice_input()
         else:
             return await self.get_text_input()
     
@@ -447,108 +427,6 @@ class ChatInterface:
             history=self.history,
             auto_suggest=AutoSuggestFromHistory()
         ).strip()
-    
-    async def get_push_to_talk_input(self) -> Optional[str]:
-        """Get voice input using push-to-talk (hold space bar for 1 second to record)"""
-        if not self.voice_enabled or not self.voice_manager:
-            console.print("[red]❌ Voice input not available")
-            return None
-        
-        if not KEYBOARD_AVAILABLE:
-            console.print("[red]❌ Keyboard detection not available. Install with: pip install keyboard")
-            return None
-        
-        console.print("[bold green]🎤 Voice Mode Active[/bold green]")
-        console.print("[dim]Hold SPACE for 1 second to start recording, keep holding to continue[/dim]")
-        console.print("[dim]Type '/voice' to switch back to text mode, or '/quit' to exit[/dim]")
-        
-        # Setup keyboard event handlers
-        space_pressed = False
-        space_press_start = None
-        recording_started = False
-        recorded_text = None
-        
-        def on_space_press():
-            nonlocal space_pressed, space_press_start, recording_started
-            if not space_pressed:
-                space_pressed = True
-                space_press_start = time.time()
-                console.print("[yellow]⏸️ Hold space for 1 second to start recording...", end="\r")
-        
-        def on_space_release():
-            nonlocal space_pressed, recording_started
-            space_pressed = False
-            if recording_started:
-                console.print("\n[yellow]🛑 Recording stopped")
-                # The recording will be stopped in the main loop
-        
-        # Set up keyboard hooks
-        keyboard.on_press_key('space', lambda _: on_space_press())
-        keyboard.on_release_key('space', lambda _: on_space_release())
-        
-        try:
-            while True:
-                # Check if space has been held for 1 second
-                if space_pressed and not recording_started and space_press_start:
-                    hold_duration = time.time() - space_press_start
-                    if hold_duration >= 1.0:
-                        recording_started = True
-                        console.print("\n[bold green]🔴 Recording started! Keep holding space...")
-                        
-                        # Start voice recording
-                        try:
-                            self.voice_recording_task = asyncio.create_task(
-                                self.voice_manager.get_voice_input(mode=VoiceInputMode.MANUAL)
-                            )
-                        except Exception as e:
-                            console.print(f"[red]❌ Failed to start recording: {e}")
-                            break
-                
-                # If recording was started and space is released, stop recording
-                if recording_started and not space_pressed:
-                    if self.voice_recording_task:
-                        try:
-                            # Stop the recording
-                            self.voice_manager.stop_recording()
-                            recorded_text = await self.voice_recording_task
-                            console.print("[green]✅ Recording finished")
-                        except Exception as e:
-                            console.print(f"[red]❌ Recording error: {e}")
-                    break
-                
-                # Check for keyboard input (commands)
-                if keyboard.is_pressed('enter'):
-                    # Check if user wants to enter a command
-                    console.print("\n[dim]Type command or press space to record:[/dim]")
-                    try:
-                        command_input = await asyncio.wait_for(
-                            asyncio.to_thread(input), timeout=0.1
-                        )
-                        if command_input.strip():
-                            if command_input.strip().startswith('/'):
-                                # Clean up keyboard hooks before returning command
-                                keyboard.unhook_all()
-                                return command_input.strip()
-                            else:
-                                console.print("[yellow]In voice mode - use space to record or type a command starting with '/'")
-                    except asyncio.TimeoutError:
-                        pass
-                
-                await asyncio.sleep(0.1)
-        
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Voice input cancelled")
-            if self.voice_recording_task:
-                self.voice_manager.stop_recording()
-        finally:
-            # Clean up keyboard hooks
-            keyboard.unhook_all()
-        
-        if recorded_text:
-            console.print(f"[dim]📝 Transcribed: {recorded_text}[/dim]")
-            return recorded_text
-        
-        return None
     
     async def get_voice_input(self) -> Optional[str]:
         """Get voice input from user with real-time feedback"""
@@ -645,24 +523,10 @@ class ChatInterface:
             console.print("[red]❌ Voice input not available")
             return
         
-        if not KEYBOARD_AVAILABLE:
-            console.print("[red]❌ Keyboard detection not available. Install with: pip install keyboard")
-            console.print("[yellow]   Voice mode requires keyboard package for push-to-talk functionality")
-            return
-        
         self.voice_mode = not self.voice_mode
         mode = "voice" if self.voice_mode else "text"
         icon = "🎤" if self.voice_mode else "⌨️"
-        
-        if self.voice_mode:
-            console.print(f"[green]✅ Switched to {mode} input mode {icon}")
-            console.print("[dim]💡 Push-to-talk controls:")
-            console.print("[dim]   • Hold SPACE for 1 second to start recording")
-            console.print("[dim]   • Keep holding SPACE to continue recording") 
-            console.print("[dim]   • Release SPACE to stop and process")
-            console.print("[dim]   • Type '/voice' to switch back to text mode")
-        else:
-            console.print(f"[green]✅ Switched to {mode} input mode {icon}")
+        console.print(f"[green]✅ Switched to {mode} input mode {icon}")
     
     async def record_voice_message(self):
         """Record a single voice message and send it"""
@@ -863,27 +727,17 @@ class ChatInterface:
         voice_commands = ""
         voice_tips = ""
         
-        if self.voice_enabled and KEYBOARD_AVAILABLE:
+        if self.voice_enabled:
             voice_commands = """
 [bold]🎤 Voice Commands:[/bold]
-[cyan]/voice[/cyan] - Toggle push-to-talk voice mode
+[cyan]/voice[/cyan] - Toggle voice input mode
 [cyan]/record[/cyan] - Record a single voice message
 [cyan]/voice-settings[/cyan] - Show voice configuration
 [cyan]/devices[/cyan] - List audio input devices
 """
-            voice_tips = """• Use /voice to enable push-to-talk mode
-• Hold SPACE for 1 second to start recording
-• Keep holding SPACE to continue recording
-• Release SPACE to stop and process audio
+            voice_tips = """• Use /voice to toggle between text and voice input
+• Voice input auto-stops on silence detection
 • All transcription happens locally (offline)
-• """
-        elif self.voice_enabled:
-            voice_commands = """
-[bold]🎤 Voice Commands:[/bold]
-[yellow]Voice input available but requires 'keyboard' package:[/yellow]
-[dim]pip install keyboard[/dim]
-"""
-            voice_tips = """• Install 'keyboard' package for push-to-talk functionality
 • """
         
         help_text = f"""
