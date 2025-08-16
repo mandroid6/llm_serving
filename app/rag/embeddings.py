@@ -205,3 +205,27 @@ class EmbeddingsManager:
         except Exception as e:
             logger.error(f"Failed to find similar chunks: {e}")
             raise RuntimeError(f"Similarity search failed: {e}")
+
+
+# Global embeddings manager instance
+embeddings_manager = EmbeddingsManager()
+
+
+def get_embeddings_manager() -> EmbeddingsManager:
+    """Get the global embeddings manager instance"""
+    return embeddings_manager
+
+
+def encode_text(text: str, normalize: bool = True) -> np.ndarray:
+    """Convenience function to encode text using global manager"""
+    return embeddings_manager.encode_text(text, normalize)
+
+
+def encode_batch(texts: List[str], normalize: bool = True, batch_size: int = 32) -> np.ndarray:
+    """Convenience function to encode batch using global manager"""
+    return embeddings_manager.encode_batch(texts, normalize, batch_size)
+
+
+def compute_similarity(query_embedding: np.ndarray, document_embeddings: np.ndarray) -> np.ndarray:
+    """Convenience function to compute similarity using global manager"""
+    return embeddings_manager.compute_similarity(query_embedding, document_embeddings)
