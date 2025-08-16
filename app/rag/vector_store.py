@@ -158,6 +158,27 @@ class VectorStore:
         # Try to load existing index
         self.load_index()
 
+    def _ensure_embeddings_loaded(self) -> bool:
+        """Ensure embeddings model is loaded"""
+        if not self.embeddings_manager.is_loaded:
+            logger.info("Loading embeddings model for vector store...")
+            return self.embeddings_manager.load_model()
+        return True
+
+    def _initialize_index(self, embedding_dim: int) -> faiss.Index:
+        """Initialize FAISS index with given dimension"""
+        if self.index_type == "IndexFlatIP":
+            # Inner Product index (good for cosine similarity with normalized vectors)
+            index = faiss.IndexFlatIP(embedding_dim)
+        elif self.index_type == "IndexFlatL2":
+            # L2 distance index
+            index = faiss.IndexFlatL2(embedding_dim)
+        else:
+            # Default to Inner Product
+            index = faiss.IndexFlatIP(embedding_dim)
+
+        logger.info(f"Initialized FAISS index: {self.index_type} with dimension {embedding_dim}")
+        return index
 
     def add_document(self, document: Document, batch_size: int = 32) -> bool:
         """Add a document and its chunks to the vector store"""
