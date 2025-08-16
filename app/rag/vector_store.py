@@ -611,3 +611,12 @@ class VectorStore:
 
         formatted_context = "\n\n---\n\n".join(context_parts)
         return results[:len(context_parts)], formatted_context
+
+
+# Global vector store instance
+vector_store = VectorStore()
+
+
+def get_vector_store() -> VectorStore:
+    """Get the global vector store instance"""
+    return vector_store
