@@ -217,6 +217,44 @@ class EmbeddingsManager:
             "max_sequence_length": getattr(self.model, 'max_seq_length', None) if self.model else None
         }
 
+    def benchmark_encoding(self, test_texts: List[str] = None) -> Dict[str, Any]:
+        """Benchmark encoding performance"""
+        if not self.is_loaded:
+            if not self.load_model():
+                raise RuntimeError("Failed to load embeddings model")
+
+        # Use default test texts if none provided
+        if test_texts is None:
+            test_texts = [
+                "This is a short sentence.",
+                "This is a longer sentence with more words to test encoding performance.",
+                "This is an even longer sentence that contains multiple concepts and ideas that need to be encoded into a vector representation for semantic search and retrieval tasks."
+            ]
+
+        try:
+            # Benchmark single encoding
+            start_time = time.time()
+            single_embedding = self.encode_text(test_texts[0])
+            single_time = time.time() - start_time
+
+            # Benchmark batch encoding
+            start_time = time.time()
+            batch_embeddings = self.encode_batch(test_texts, show_progress=False)
+            batch_time = time.time() - start_time
+
+            return {
+                "single_encoding_time": single_time,
+                "batch_encoding_time": batch_time,
+                "texts_per_second": len(test_texts) / batch_time,
+                "embedding_shape": single_embedding.shape,
+                "batch_shape": batch_embeddings.shape,
+                "test_texts_count": len(test_texts)
+            }
+
+        except Exception as e:
+            logger.error(f"Benchmark failed: {e}")
+            raise RuntimeError(f"Benchmark failed: {e}")
+
 
 # Global embeddings manager instance
 embeddings_manager = EmbeddingsManager()
