@@ -39,3 +39,10 @@ pytest-asyncio
 
 # Logging and Monitoring
 structlog
+
+# RAG (Retrieval-Augmented Generation) Support
+PyPDF2>=3.0.1
+sentence-transformers>=2.2.2
+faiss-cpu>=1.7.4
+langchain-text-splitters>=0.0.1
+pymupdf>=1.23.0
