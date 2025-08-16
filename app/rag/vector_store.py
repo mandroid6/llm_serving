@@ -251,6 +251,73 @@ class VectorStore:
                 logger.error(f"Failed to add document {document.document_id}: {e}")
                 return False
 
+    def search(
+        self,
+        query: str,
+        k: Optional[int] = None,
+        similarity_threshold: Optional[float] = None,
+        document_ids: Optional[List[str]] = None
+    ) -> List[SearchResult]:
+        """Search for similar chunks using vector similarity"""
+        with self._lock:
+            try:
+                if not self._ensure_embeddings_loaded():
+                    raise RuntimeError("Failed to load embeddings model")
+
+                if self.index is None or len(self.chunks_metadata) == 0:
+                    logger.warning("Vector store is empty")
+                    return []
+
+                # Use default values from settings
+                k = k or settings.rag.max_chunks_per_query
+                similarity_threshold = similarity_threshold or settings.rag.similarity_threshold
+
+                # Generate query embedding
+                query_embedding = self.embeddings_manager.encode_text(query, normalize=True)
+                query_embedding = query_embedding.reshape(1, -1).astype(np.float32)
+
+                # Search FAISS index
+                search_k = min(k * 2, len(self.chunks_metadata))  # Get more results for filtering
+                scores, indices = self.index.search(query_embedding, search_k)
+
+                # Process results
+                results = []
+                for rank, (score, idx) in enumerate(zip(scores[0], indices[0])):
+                    if idx == -1:  # FAISS returns -1 for invalid indices
+                        continue
+
+                    if idx >= len(self.chunks_metadata):
+                        logger.warning(f"Invalid chunk index: {idx}")
+                        continue
+
+                    chunk_metadata = self.chunks_metadata[idx]
+
+                    # Filter by document IDs if specified
+                    if document_ids and chunk_metadata.document_id not in document_ids:
+                        continue
+
+                    # Filter by similarity threshold
+                    if score < similarity_threshold:
+                        continue
+
+                    result = SearchResult(
+                        chunk_metadata=chunk_metadata,
+                        similarity_score=float(score),
+                        rank=len(results) + 1
+                    )
+
+                    results.append(result)
+
+                    # Stop when we have enough results
+                    if len(results) >= k:
+                        break
+
+                logger.info(f"Found {len(results)} relevant chunks for query (threshold: {similarity_threshold})")
+                return results
+
+            except Exception as e:
+                logger.error(f"Search failed: {e}")
+                return []
 
     def get_chunk_by_id(self, chunk_id: str) -> Optional[ChunkMetadata]:
         """Get chunk metadata by chunk ID"""
