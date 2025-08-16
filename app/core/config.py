@@ -225,6 +225,35 @@ MODEL_PROFILES: Dict[str, ModelProfile] = {
         default_top_p=0.8,
         default_top_k=20
     ),
+    
+    # DeepSeek v3 Models
+    "deepseek-v3-base": ModelProfile(
+        name="DeepSeek V3 Base",
+        model_id="deepseek-ai/DeepSeek-V3-Base",
+        max_length=32768,
+        chat_template="deepseek",
+        supports_chat=True,
+        memory_gb=24.0,
+        description="DeepSeek V3 Base - Advanced reasoning and code generation model",
+        default_temperature=0.7,
+        default_max_tokens=300,
+        default_top_p=0.8,
+        default_top_k=20
+    ),
+    
+    "deepseek-v3": ModelProfile(
+        name="DeepSeek V3",
+        model_id="deepseek-ai/DeepSeek-V3",
+        max_length=32768,
+        chat_template="deepseek",
+        supports_chat=True,
+        memory_gb=28.0,
+        description="DeepSeek V3 - Latest version with enhanced capabilities",
+        default_temperature=0.7,
+        default_max_tokens=400,
+        default_top_p=0.8,
+        default_top_k=20
+    ),
 }
 
 
@@ -243,6 +272,16 @@ CHAT_TEMPLATES: Dict[str, str] = {
 {% for message in messages %}{% if message['role'] != 'system' %}<|im_start|>{{ message['role'] }}
 {{ message['content'] }}<|im_end|>
 {% endif %}{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant
+{% endif %}""",
+
+    "deepseek": """<|begin_of_text|>{% for message in messages %}{% if message['role'] == 'system' %}<|start_header_id|>system<|end_header_id|>
+
+{{ message['content'] }}<|eot_id|>{% elif message['role'] == 'user' %}<|start_header_id|>user<|end_header_id|>
+
+{{ message['content'] }}<|eot_id|>{% elif message['role'] == 'assistant' %}<|start_header_id|>assistant<|end_header_id|>
+
+{{ message['content'] }}<|eot_id|>{% endif %}{% endfor %}{% if add_generation_prompt %}<|start_header_id|>assistant<|end_header_id|>
+
 {% endif %}""",
 
     "dialogpt": """{% for message in messages %}{% if message['role'] == 'user' %}{{ message['content'] }}{% elif message['role'] == 'assistant' %}{{ message['content'] }}{% endif %}{% if not loop.last %}<|endoftext|>{% endif %}{% endfor %}{% if add_generation_prompt %}<|endoftext|>{% endif %}""",

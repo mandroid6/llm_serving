@@ -103,7 +103,9 @@ class ChatModelManager:
             "Qwen/Qwen2.5-1.5B-Instruct",
             "Qwen/Qwen2.5-3B-Instruct", 
             "Qwen/Qwen2.5-7B-Instruct",
-            "Qwen/Qwen2.5-14B-Instruct"
+            "Qwen/Qwen2.5-14B-Instruct",
+            "deepseek-ai/DeepSeek-V3-Base",
+            "deepseek-ai/DeepSeek-V3"
         ]
         
         # Use custom templates for models that need them
