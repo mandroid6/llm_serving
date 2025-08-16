@@ -63,13 +63,35 @@ class ChatModelManager:
             # Setup chat template
             self._setup_chat_template()
             
-            # Load model
+            # Load model with appropriate settings for the device
+            model_kwargs = {
+                "cache_dir": settings.model_cache_dir,
+                "low_cpu_mem_usage": True,
+                "trust_remote_code": True
+            }
+            
+            # Configure dtype and device-specific settings
+            if settings.device == "cuda" and torch.cuda.is_available():
+                model_kwargs["torch_dtype"] = torch.float16
+                model_kwargs["device_map"] = "auto"
+            elif settings.device == "mps" and torch.backends.mps.is_available():
+                # Use MPS (Metal Performance Shaders) on Mac
+                model_kwargs["torch_dtype"] = torch.float16
+            else:
+                # CPU fallback - use float32 for better compatibility
+                model_kwargs["torch_dtype"] = torch.float32
+                
+            # Special handling for DeepSeek models on CPU/Mac
+            if "deepseek" in self.profile.model_id.lower():
+                model_kwargs["torch_dtype"] = torch.float32  # Force float32 for DeepSeek on CPU
+                if settings.device != "cuda":
+                    # Disable any quantization for CPU
+                    model_kwargs["load_in_8bit"] = False
+                    model_kwargs["load_in_4bit"] = False
+            
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.profile.model_id,
-                cache_dir=settings.model_cache_dir,
-                torch_dtype=torch.float16 if settings.device == "cuda" else torch.float32,
-                low_cpu_mem_usage=True,
-                trust_remote_code=True
+                **model_kwargs
             )
             
             # Move model to device
@@ -104,8 +126,9 @@ class ChatModelManager:
             "Qwen/Qwen2.5-3B-Instruct", 
             "Qwen/Qwen2.5-7B-Instruct",
             "Qwen/Qwen2.5-14B-Instruct",
-            "deepseek-ai/DeepSeek-V3-Base",
-            "deepseek-ai/DeepSeek-V3"
+            "deepseek-ai/deepseek-coder-1.3b-instruct",
+            "deepseek-ai/deepseek-coder-6.7b-instruct",
+            "deepseek-ai/deepseek-math-7b-instruct"
         ]
         
         # Use custom templates for models that need them

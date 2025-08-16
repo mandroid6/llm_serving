@@ -90,7 +90,7 @@ class Settings(BaseSettings):
 
     # Performance Settings
     torch_threads: int = 1
-    device: str = "cpu"  # Start with CPU, can be changed to "cuda" if available
+    device: str = "cpu"  # Start with CPU, can be changed to "cuda" or "mps" if available
 
     # Logging
     log_level: str = "INFO"
@@ -226,29 +226,43 @@ MODEL_PROFILES: Dict[str, ModelProfile] = {
         default_top_k=20
     ),
     
-    # DeepSeek v3 Models
-    "deepseek-v3-base": ModelProfile(
-        name="DeepSeek V3 Base",
-        model_id="deepseek-ai/DeepSeek-V3-Base",
-        max_length=32768,
+    # DeepSeek Models (CPU-compatible versions)
+    "deepseek-coder-1.3b": ModelProfile(
+        name="DeepSeek Coder 1.3B",
+        model_id="deepseek-ai/deepseek-coder-1.3b-instruct",
+        max_length=16384,
         chat_template="deepseek",
         supports_chat=True,
-        memory_gb=24.0,
-        description="DeepSeek V3 Base - Advanced reasoning and code generation model",
+        memory_gb=6.0,
+        description="DeepSeek Coder 1.3B - Code generation and reasoning (CPU compatible)",
         default_temperature=0.7,
         default_max_tokens=300,
         default_top_p=0.8,
         default_top_k=20
     ),
     
-    "deepseek-v3": ModelProfile(
-        name="DeepSeek V3",
-        model_id="deepseek-ai/DeepSeek-V3",
-        max_length=32768,
+    "deepseek-coder-6.7b": ModelProfile(
+        name="DeepSeek Coder 6.7B", 
+        model_id="deepseek-ai/deepseek-coder-6.7b-instruct",
+        max_length=16384,
         chat_template="deepseek",
         supports_chat=True,
-        memory_gb=28.0,
-        description="DeepSeek V3 - Latest version with enhanced capabilities",
+        memory_gb=16.0,
+        description="DeepSeek Coder 6.7B - Advanced code generation (CPU compatible)",
+        default_temperature=0.7,
+        default_max_tokens=400,
+        default_top_p=0.8,
+        default_top_k=20
+    ),
+    
+    "deepseek-math-7b": ModelProfile(
+        name="DeepSeek Math 7B",
+        model_id="deepseek-ai/deepseek-math-7b-instruct",
+        max_length=4096,
+        chat_template="deepseek", 
+        supports_chat=True,
+        memory_gb=16.0,
+        description="DeepSeek Math 7B - Mathematical reasoning and problem solving",
         default_temperature=0.7,
         default_max_tokens=400,
         default_top_p=0.8,
@@ -324,5 +338,23 @@ def get_all_models() -> List[str]:
     return list(MODEL_PROFILES.keys())
 
 
+def get_optimal_device() -> str:
+    """Get the optimal device for the current hardware"""
+    import torch
+    
+    if torch.cuda.is_available():
+        return "cuda"
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return "mps"  # Metal Performance Shaders on Mac
+    else:
+        return "cpu"
+
+
 # Global settings instance
 settings = Settings()
+
+# Auto-detect optimal device if using default
+if settings.device == "cpu":
+    optimal_device = get_optimal_device()
+    if optimal_device != "cpu":
+        settings.device = optimal_device
