@@ -139,3 +139,69 @@ class EmbeddingsManager:
         except Exception as e:
             logger.error(f"Failed to encode batch: {e}")
             raise RuntimeError(f"Batch encoding failed: {e}")
+
+    def compute_similarity(
+        self,
+        query_embedding: np.ndarray,
+        document_embeddings: np.ndarray
+    ) -> np.ndarray:
+        """Compute cosine similarity between query and document embeddings"""
+        try:
+            # Ensure embeddings are normalized
+            if query_embedding.ndim == 1:
+                query_embedding = query_embedding.reshape(1, -1)
+
+            # Normalize embeddings
+            query_norm = query_embedding / np.linalg.norm(query_embedding, axis=1, keepdims=True)
+            doc_norms = document_embeddings / np.linalg.norm(document_embeddings, axis=1, keepdims=True)
+
+            # Compute cosine similarity
+            similarities = np.dot(query_norm, doc_norms.T).flatten()
+
+            return similarities
+
+        except Exception as e:
+            logger.error(f"Failed to compute similarity: {e}")
+            raise RuntimeError(f"Similarity computation failed: {e}")
+
+    def find_similar_chunks(
+        self,
+        query: str,
+        chunk_embeddings: np.ndarray,
+        threshold: float = None,
+        top_k: int = None
+    ) -> List[Dict[str, Any]]:
+        """Find chunks similar to the query"""
+
+        threshold = threshold or settings.rag.similarity_threshold
+        top_k = top_k or settings.rag.max_chunks_per_query
+
+        try:
+            # Encode the query
+            query_embedding = self.encode_text(query, normalize=True)
+
+            # Compute similarities
+            similarities = self.compute_similarity(query_embedding, chunk_embeddings)
+
+            # Create results with indices and scores
+            results = []
+            for idx, score in enumerate(similarities):
+                if score >= threshold:
+                    results.append({
+                        "chunk_index": idx,
+                        "similarity_score": float(score),
+                        "relevance_rank": 0  # Will be set after sorting
+                    })
+
+            # Sort by similarity score (descending)
+            results.sort(key=lambda x: x["similarity_score"], reverse=True)
+
+            # Add relevance rank and limit to top_k
+            for rank, result in enumerate(results[:top_k]):
+                result["relevance_rank"] = rank + 1
+
+            return results[:top_k]
+
+        except Exception as e:
+            logger.error(f"Failed to find similar chunks: {e}")
+            raise RuntimeError(f"Similarity search failed: {e}")
