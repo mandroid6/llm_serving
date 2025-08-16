@@ -280,7 +280,7 @@ class ChatInterface:
         console.print(table)
     
     async def switch_model(self, model_name: str):
-        """Switch to a different model"""
+        """Switch to a different model with enhanced progress tracking"""
         if model_name not in self.available_models:
             console.print(f"[red]❌ Unknown model: {model_name}")
             console.print(f"[yellow]Available models: {', '.join(self.available_models.keys())}")
@@ -290,20 +290,152 @@ class ChatInterface:
             console.print(f"[yellow]Already using model: {model_name}")
             return
         
+        model_info = self.available_models[model_name]
+        memory_req = model_info.get("memory_requirement", "Unknown")
+        
         try:
-            with console.status(f"[bold blue]Switching to {model_name}..."):
-                result = await self.api.switch_model(model_name)
+            from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
+            
+            # Show model info before switching
+            console.print(f"\n[bold blue]🔄 Switching to: {model_name}[/bold blue]")
+            console.print(f"[dim]Display Name: {model_info['display_name']}[/dim]")
+            console.print(f"[dim]Memory Required: {memory_req}[/dim]")
+            console.print(f"[dim]Description: {model_info['description']}[/dim]")
+            
+            # Create a detailed progress display
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]{task.fields[stage]}"),
+                BarColumn(bar_width=30, style="blue", complete_style="green"),
+                TaskProgressColumn(),
+                TextColumn("•"),
+                TextColumn("{task.fields[status]}"),
+                TimeElapsedColumn(),
+                console=console,
+                transient=False
+            ) as progress:
+                
+                # Add the main progress task
+                task_id = progress.add_task(
+                    "Loading model...",
+                    total=100,
+                    stage="🔄 Initializing",
+                    status="Starting model switch..."
+                )
+                
+                # Start the API call
+                import asyncio
+                
+                # Use a longer timeout for large models
+                timeout = 300.0 if "GB" in memory_req and any(size in memory_req for size in ["10", "16", "24", "28"]) else 120.0
+                
+                async def make_switch_request():
+                    async with httpx.AsyncClient(timeout=timeout) as client:
+                        response = await client.post(
+                            f"{self.api.base_url}/api/v1/chat/switch-model",
+                            json={"model_name": model_name}
+                        )
+                        response.raise_for_status()
+                        return response.json()
+                
+                # Simulate progress tracking since we don't have streaming yet
+                # This provides user feedback during the potentially long loading process
+                async def simulate_progress():
+                    stages = [
+                        (10, "🔧 Preparing", "Validating model configuration..."),
+                        (20, "📥 Downloading", "Downloading model files (first time only)..."),
+                        (40, "🔍 Loading", "Loading tokenizer and configuration..."),
+                        (60, "🧠 Processing", "Loading model weights into memory..."),
+                        (80, "⚙️ Optimizing", "Optimizing model for your hardware..."),
+                        (95, "✅ Finalizing", "Almost ready...")
+                    ]
+                    
+                    api_task = asyncio.create_task(make_switch_request())
+                    
+                    # Update progress while API call is running
+                    stage_index = 0
+                    last_progress = 5
+                    
+                    while not api_task.done():
+                        await asyncio.sleep(1.0)  # Update every second
+                        
+                        # Move through stages progressively
+                        if stage_index < len(stages):
+                            target_progress, stage_name, stage_message = stages[stage_index]
+                            
+                            # Gradually increase progress toward target
+                            if last_progress < target_progress:
+                                last_progress = min(target_progress, last_progress + 2)
+                                progress.update(
+                                    task_id,
+                                    completed=last_progress,
+                                    stage=stage_name,
+                                    status=stage_message
+                                )
+                                
+                                # Move to next stage when target reached
+                                if last_progress >= target_progress:
+                                    stage_index += 1
+                        else:
+                            # Final stage - hold at 95% until completion
+                            progress.update(
+                                task_id,
+                                completed=95,
+                                stage="⏳ Loading",
+                                status="Finalizing model loading, please wait..."
+                            )
+                    
+                    # API call completed
+                    result = await api_task
+                    
+                    # Complete the progress
+                    progress.update(
+                        task_id,
+                        completed=100,
+                        stage="✅ Complete",
+                        status=f"Model loaded successfully!"
+                    )
+                    
+                    return result
+                
+                # Run the progress simulation
+                result = await simulate_progress()
             
             self.current_model = model_name
-            console.print(f"[green]✅ Switched to {result['model_name']}")
-            console.print(f"[dim]Load time: {result.get('load_time', 0):.2f}s[/dim]")
+            load_time = result.get('load_time', 0)
+            
+            # Show success message with details
+            console.print(f"\n[bold green]✅ Successfully switched to {result['model_name']}[/bold green]")
+            console.print(f"[dim]Load time: {load_time:.1f}s | Memory: {memory_req} | Chat support: {'✅' if model_info['supports_chat'] else '❌'}[/dim]")
             
             # Start new conversation with new model
             await self.api.new_conversation()
             console.print("[dim]Started new conversation with new model[/dim]")
             
+        except httpx.TimeoutException:
+            console.print(f"\n[red]❌ Model loading timed out[/red]")
+            console.print("[yellow]💡 Large models can take several minutes to download on first use")
+            console.print("[yellow]   Please check your internet connection and try again")
+            
         except Exception as e:
-            console.print(f"[red]❌ Failed to switch model: {e}")
+            console.print(f"\n[red]❌ Failed to switch model: {e}[/red]")
+            
+            # Provide helpful error information
+            if "503" in str(e):
+                console.print("[yellow]💡 Server might be starting up or busy. Please wait and try again.")
+            elif "No GPU" in str(e) or "FP8" in str(e):
+                console.print("[yellow]💡 This model requires GPU support. Try CPU-compatible alternatives:")
+                cpu_models = [name for name, info in self.available_models.items() 
+                             if "cpu compatible" in info.get("description", "").lower() or 
+                                name.startswith(("gpt2", "qwen", "deepseek-coder"))]
+                if cpu_models:
+                    console.print(f"[cyan]   Recommended: {', '.join(cpu_models[:3])}[/cyan]")
+            elif "memory" in str(e).lower() or "oom" in str(e).lower():
+                console.print(f"[yellow]💡 Model requires {memory_req} RAM. Try a smaller model:")
+                small_models = [name for name, info in self.available_models.items() 
+                               if "1.8b" in name or "1.3b" in name or name.startswith("gpt2")]
+                if small_models:
+                    console.print(f"[cyan]   Try: {', '.join(small_models[:3])}[/cyan]")
     
     async def send_message(self, message: str):
         """Send a chat message and display response"""
@@ -749,12 +881,21 @@ class ChatInterface:
 • Use Tab for auto-completion
 • Press Ctrl+C to interrupt generation
 • Conversations auto-save every 10 messages
-• Use Qwen models for best multilingual chat experience
+• Model switching shows detailed progress for large downloads
+• Use Qwen and DeepSeek models for best performance
 {voice_tips}
 [bold]🦙 Recommended Models:[/bold]
-• [green]qwen3-1.8b[/green] - High-quality multilingual, 6GB RAM required (default)
+• [green]qwen3-1.8b[/green] - High-quality multilingual, 6GB RAM (default)
 • [green]qwen3-3b[/green] - Advanced quality, 8GB RAM required
-• [green]llama3-1b[/green] - Fast alternative, 4GB RAM required
+• [green]deepseek-coder-1.3b[/green] - Excellent for coding tasks, 6GB RAM
+• [green]deepseek-coder-6.7b[/green] - Advanced coding assistance, 16GB RAM
+• [green]deepseek-math-7b[/green] - Mathematical reasoning, 16GB RAM
+• [green]gpt2[/green] - Fast lightweight option, 2GB RAM
+
+[bold]⚠️ MacBook Pro Notes:[/bold]
+• All models are optimized for CPU/MPS (Metal Performance Shaders)
+• First-time downloads may take several minutes for large models
+• Models are cached locally after first download
         """
         console.print(Panel(help_text, title="🆘 Help", border_style="blue"))
     

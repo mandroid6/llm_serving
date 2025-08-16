@@ -3,7 +3,7 @@ Chat-aware model manager that handles conversation context and chat templates
 """
 import time
 import torch
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional, AsyncGenerator, Callable
 from transformers import (
     AutoTokenizer, 
     AutoModelForCausalLM, 
@@ -19,6 +19,49 @@ from app.core.config import settings, get_model_profile, CHAT_TEMPLATES
 from app.models.conversation import Conversation
 
 logger = logging.getLogger(__name__)
+
+
+class ModelLoadingProgress:
+    """Class to track model loading progress"""
+    
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self.stage = "initializing"
+        self.progress = 0.0
+        self.status_message = "Starting model load..."
+        self.start_time = time.time()
+        self.callbacks: List[Callable] = []
+    
+    def add_callback(self, callback: Callable):
+        """Add a progress callback function"""
+        self.callbacks.append(callback)
+    
+    def update(self, stage: str, progress: float, message: str = ""):
+        """Update progress and notify callbacks"""
+        self.stage = stage
+        self.progress = max(0.0, min(100.0, progress))
+        self.status_message = message or f"{stage.title()}..."
+        
+        # Notify all callbacks
+        for callback in self.callbacks:
+            try:
+                callback(self)
+            except Exception as e:
+                logger.warning(f"Progress callback error: {e}")
+    
+    def get_elapsed_time(self) -> float:
+        """Get elapsed time since start"""
+        return time.time() - self.start_time
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for API responses"""
+        return {
+            "model_name": self.model_name,
+            "stage": self.stage,
+            "progress": self.progress,
+            "status_message": self.status_message,
+            "elapsed_time": self.get_elapsed_time()
+        }
 
 
 class ChatModelManager:
@@ -42,13 +85,20 @@ class ChatModelManager:
         if settings.device == "cpu":
             torch.set_num_threads(settings.torch_threads)
     
-    async def load_model(self) -> bool:
-        """Load the model and tokenizer with chat template support"""
+    async def load_model(self, progress_callback: Optional[Callable] = None) -> bool:
+        """Load the model and tokenizer with chat template support and progress tracking"""
+        progress = ModelLoadingProgress(self.profile.name)
+        if progress_callback:
+            progress.add_callback(progress_callback)
+        
         try:
             start_time = time.time()
             logger.info(f"Loading model: {self.profile.name} ({self.profile.model_id})")
             
-            # Load tokenizer
+            # Stage 1: Initialize tokenizer
+            progress.update("tokenizer", 10, f"Loading tokenizer for {self.profile.name}")
+            await asyncio.sleep(0.1)  # Allow UI updates
+            
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.profile.model_id,
                 cache_dir=settings.model_cache_dir,
@@ -56,12 +106,19 @@ class ChatModelManager:
                 trust_remote_code=True
             )
             
+            progress.update("tokenizer", 25, "Tokenizer loaded, configuring...")
+            
             # Add pad token if it doesn't exist
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
             
             # Setup chat template
+            progress.update("template", 30, "Setting up chat template...")
             self._setup_chat_template()
+            
+            # Stage 2: Prepare model loading
+            progress.update("model_prep", 35, "Preparing model configuration...")
+            await asyncio.sleep(0.1)
             
             # Load model with appropriate settings for the device
             model_kwargs = {
@@ -89,24 +146,51 @@ class ChatModelManager:
                     model_kwargs["load_in_8bit"] = False
                     model_kwargs["load_in_4bit"] = False
             
+            # Stage 3: Download/load model (this is the longest step)
+            progress.update("downloading", 40, f"Downloading {self.profile.name} model files...")
+            
+            # For large models, provide more detailed feedback
+            estimated_size_gb = self.profile.memory_gb
+            if estimated_size_gb > 10:
+                progress.update("downloading", 50, f"Large model detected ({estimated_size_gb}GB), this may take several minutes...")
+                await asyncio.sleep(0.5)
+                progress.update("downloading", 60, "Please wait while model files are downloaded and cached...")
+                await asyncio.sleep(0.5)
+                progress.update("downloading", 70, "Download in progress... (first time only)")
+                await asyncio.sleep(0.5)
+            
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.profile.model_id,
                 **model_kwargs
             )
             
-            # Move model to device
+            progress.update("loading", 80, "Model downloaded, loading into memory...")
+            await asyncio.sleep(0.1)
+            
+            # Stage 4: Move to device and finalize
+            progress.update("device", 85, f"Moving model to {self.device}...")
             self.model = self.model.to(self.device)
             self.model.eval()  # Set to evaluation mode
+            
+            progress.update("finalizing", 95, "Finalizing model setup...")
+            await asyncio.sleep(0.1)
             
             self.load_time = time.time() - start_time
             self.is_loaded = True
             
+            progress.update("complete", 100, f"Model loaded successfully in {self.load_time:.1f}s")
+            
             logger.info(f"Model loaded successfully in {self.load_time:.2f} seconds")
             logger.info(f"Chat support: {self.supports_chat}")
+            logger.info(f"Device: {self.device}")
+            logger.info(f"Memory requirement: {self.profile.memory_gb}GB")
+            
             return True
             
         except Exception as e:
-            logger.error(f"Failed to load model: {str(e)}")
+            error_msg = f"Failed to load model: {str(e)}"
+            progress.update("error", 0, error_msg)
+            logger.error(error_msg)
             self.is_loaded = False
             return False
     
@@ -479,16 +563,29 @@ class ChatModelManager:
         
         return base_info
     
-    def switch_model(self, model_name: str) -> bool:
-        """Switch to a different model"""
+    def switch_model(self, model_name: str, progress_callback: Optional[Callable] = None) -> bool:
+        """Switch to a different model with progress tracking"""
         if model_name == self.model_name:
+            if progress_callback:
+                progress = ModelLoadingProgress(self.profile.name)
+                progress.update("complete", 100, f"Model {model_name} already loaded")
+                progress_callback(progress)
             return True
+        
+        # Progress tracking for cleanup
+        if progress_callback:
+            progress = ModelLoadingProgress(f"Switching to {model_name}")
+            progress.add_callback(progress_callback)
+            progress.update("cleanup", 5, f"Unloading current model ({self.model_name})...")
         
         # Unload current model
         if self.is_loaded:
             del self.model
             del self.tokenizer
             torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        
+        if progress_callback:
+            progress.update("initializing", 10, f"Initializing {model_name}...")
         
         # Load new model
         self.model_name = model_name
