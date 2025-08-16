@@ -491,3 +491,54 @@ class VectorStore:
                 self.document_id_to_chunks = {}
                 self.embedding_dim = None
                 return False
+
+
+    def get_similar_chunks_for_rag(
+        self,
+        query: str,
+        max_chunks: Optional[int] = None,
+        similarity_threshold: Optional[float] = None,
+        max_total_length: Optional[int] = None
+    ) -> Tuple[List[SearchResult], str]:
+        """
+        Get similar chunks formatted for RAG context
+        Returns (search_results, formatted_context)
+        """
+        max_chunks = max_chunks or settings.rag.max_chunks_per_query
+        similarity_threshold = similarity_threshold or settings.rag.similarity_threshold
+        max_total_length = max_total_length or settings.rag.max_context_length
+
+        # Search for similar chunks
+        results = self.search(
+            query=query,
+            k=max_chunks,
+            similarity_threshold=similarity_threshold
+        )
+
+        if not results:
+            return [], ""
+
+        # Format context for RAG
+        context_parts = []
+        total_length = 0
+
+        for result in results:
+            chunk_text = result.chunk_metadata.content
+
+            # Add source reference if enabled
+            if settings.rag.include_source_references:
+                source_ref = f"[Document: {result.chunk_metadata.document_id}"
+                if result.chunk_metadata.page_number:
+                    source_ref += f", Page: {result.chunk_metadata.page_number}"
+                source_ref += f", Relevance: {result.similarity_score:.2f}]"
+                chunk_text = f"{source_ref}\n{chunk_text}"
+
+            # Check if adding this chunk would exceed max length
+            if max_total_length and total_length + len(chunk_text) > max_total_length:
+                break
+
+            context_parts.append(chunk_text)
+            total_length += len(chunk_text)
+
+        formatted_context = "\n\n---\n\n".join(context_parts)
+        return results[:len(context_parts)], formatted_context
