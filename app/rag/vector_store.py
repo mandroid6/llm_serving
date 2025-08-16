@@ -19,6 +19,7 @@ import faiss
 
 from app.core.config import settings
 from app.rag.document_processor import DocumentChunk, Document
+from app.rag.embeddings import get_embeddings_manager
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,33 @@ class ChunkMetadata:
         )
 
 
+class SearchResult:
+    """Result from vector similarity search"""
+
+    def __init__(
+        self,
+        chunk_metadata: ChunkMetadata,
+        similarity_score: float,
+        rank: int,
+        embedding: Optional[np.ndarray] = None
+    ):
+        self.chunk_metadata = chunk_metadata
+        self.similarity_score = similarity_score
+        self.rank = rank
+        self.embedding = embedding
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary"""
+        return {
+            "chunk_id": self.chunk_metadata.chunk_id,
+            "document_id": self.chunk_metadata.document_id,
+            "content": self.chunk_metadata.content,
+            "page_number": self.chunk_metadata.page_number,
+            "similarity_score": self.similarity_score,
+            "rank": self.rank,
+            "metadata": self.chunk_metadata.chunk_metadata
+        }
+
 
 class VectorStore:
     """Vector store for document chunks using FAISS"""
@@ -102,6 +130,15 @@ class VectorStore:
         self.chunk_id_to_index: Dict[str, int] = {}
         self.document_id_to_chunks: Dict[str, List[int]] = {}
 
+        # Embeddings manager
+        self.embeddings_manager = get_embeddings_manager()
+
+        # Index configuration
+        self.embedding_dim: Optional[int] = None
+        self.index_type = "IndexFlatIP"  # Inner Product (cosine similarity for normalized vectors)
+
+        # Thread safety
+        self._lock = threading.RLock()
 
         # Statistics
         self.stats = {
@@ -110,3 +147,85 @@ class VectorStore:
             "last_updated": None,
             "index_size_mb": 0.0
         }
+
+        # File paths
+        self.index_path = self.vector_db_dir / "faiss_index.bin"
+        self.metadata_path = self.vector_db_dir / "metadata.json"
+        self.stats_path = self.vector_db_dir / "stats.json"
+
+        logger.info(f"VectorStore initialized with directory: {self.vector_db_dir}")
+
+        # Try to load existing index
+        self.load_index()
+
+
+    def add_document(self, document: Document, batch_size: int = 32) -> bool:
+        """Add a document and its chunks to the vector store"""
+        with self._lock:
+            try:
+                if not self._ensure_embeddings_loaded():
+                    raise RuntimeError("Failed to load embeddings model")
+
+                if not document.chunks:
+                    logger.warning(f"Document {document.document_id} has no chunks to add")
+                    return False
+
+                # Get embedding dimension if not set
+                if self.embedding_dim is None:
+                    self.embedding_dim = self.embeddings_manager.embedding_dim
+                    if self.embedding_dim is None:
+                        # Get dimension by encoding a sample text
+                        sample_embedding = self.embeddings_manager.encode_text("sample text")
+                        self.embedding_dim = sample_embedding.shape[0]
+
+                # Initialize index if needed
+                if self.index is None:
+                    self.index = self._initialize_index(self.embedding_dim)
+
+                # Check if document already exists
+                if document.document_id in self.document_id_to_chunks:
+                    logger.warning(f"Document {document.document_id} already exists in vector store")
+                    return False
+
+                # Extract chunk texts for batch embedding
+                chunk_texts = [chunk.content for chunk in document.chunks]
+
+                # Generate embeddings in batches
+                logger.info(f"Generating embeddings for {len(chunk_texts)} chunks...")
+                embeddings = self.embeddings_manager.encode_batch(
+                    chunk_texts,
+                    normalize=True,
+                    batch_size=batch_size,
+                    show_progress=len(chunk_texts) > 50
+                )
+
+                # Prepare chunk metadata
+                chunk_indices = []
+                for i, chunk in enumerate(document.chunks):
+                    chunk_metadata = ChunkMetadata.from_document_chunk(chunk)
+
+                    # Add to metadata storage
+                    chunk_index = len(self.chunks_metadata)
+                    self.chunks_metadata.append(chunk_metadata)
+                    self.chunk_id_to_index[chunk.chunk_id] = chunk_index
+                    chunk_indices.append(chunk_index)
+
+                # Add document to chunks mapping
+                self.document_id_to_chunks[document.document_id] = chunk_indices
+
+                # Add embeddings to FAISS index
+                self.index.add(embeddings.astype(np.float32))
+
+                # Update statistics
+                self.stats["total_chunks"] += len(document.chunks)
+                if document.document_id not in self.document_id_to_chunks or len(self.document_id_to_chunks[document.document_id]) == len(chunk_indices):
+                    self.stats["total_documents"] += 1
+                self.stats["last_updated"] = datetime.now().isoformat()
+                self._update_index_size()
+
+                logger.info(f"Added document {document.document_id} with {len(document.chunks)} chunks to vector store")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to add document {document.document_id}: {e}")
+                return False
