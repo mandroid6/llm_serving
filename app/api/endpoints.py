@@ -20,11 +20,27 @@ from app.models.schemas import (
     ModelSwitchRequest,
     ModelListResponse,
     NewConversationRequest,
-    ChatMessage
+    ChatMessage,
+    # RAG-specific schemas
+    DocumentUploadRequest,
+    DocumentUploadResponse,
+    DocumentListResponse,
+    DocumentInfo,
+    SearchRequest,
+    SearchResponse,
+    SearchResult,
+    RAGChatRequest,
+    RAGChatResponse,
+    VectorStoreStatsResponse
 )
 from app.models.chat_manager import ChatModelManager
 from app.models.conversation import Conversation
 from app.core.config import settings, get_model_profile, get_chat_models, get_all_models
+
+# RAG imports
+from app.rag.document_processor import DocumentProcessor, Document
+from app.rag.vector_store import get_vector_store, VectorStore
+from app.rag.embeddings import get_embeddings_manager
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +49,11 @@ router = APIRouter()
 
 # Global chat model manager instance
 chat_model_manager = ChatModelManager()
+
+# RAG components
+document_processor = DocumentProcessor()
+vector_store = get_vector_store()
+embeddings_manager = get_embeddings_manager()
 
 # Active conversations storage (in production, use Redis or database)
 active_conversations: Dict[str, Conversation] = {}
