@@ -8,6 +8,7 @@ uvicorn[standard]
 torch
 transformers
 tokenizers
+accelerate
 
 # Data Validation and Serialization
 pydantic
