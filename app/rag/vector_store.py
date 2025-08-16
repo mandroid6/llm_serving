@@ -86,3 +86,27 @@ class ChunkMetadata:
             chunk_metadata=chunk.metadata,
             created_at=chunk.created_at
         )
+
+
+
+class VectorStore:
+    """Vector store for document chunks using FAISS"""
+
+    def __init__(self, vector_db_dir: Optional[str] = None):
+        self.vector_db_dir = Path(vector_db_dir or settings.rag.vector_db_dir)
+        self.vector_db_dir.mkdir(exist_ok=True, parents=True)
+
+        # FAISS index and metadata
+        self.index: Optional[faiss.Index] = None
+        self.chunks_metadata: List[ChunkMetadata] = []
+        self.chunk_id_to_index: Dict[str, int] = {}
+        self.document_id_to_chunks: Dict[str, List[int]] = {}
+
+
+        # Statistics
+        self.stats = {
+            "total_chunks": 0,
+            "total_documents": 0,
+            "last_updated": None,
+            "index_size_mb": 0.0
+        }
