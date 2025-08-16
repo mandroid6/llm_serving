@@ -342,3 +342,152 @@ class VectorStore:
                     chunks.append(self.chunks_metadata[idx])
 
             return chunks
+
+    def delete_document(self, document_id: str) -> bool:
+        """Delete a document and all its chunks from the vector store"""
+        with self._lock:
+            try:
+                if document_id not in self.document_id_to_chunks:
+                    logger.warning(f"Document {document_id} not found in vector store")
+                    return False
+
+                chunk_indices = self.document_id_to_chunks[document_id]
+
+                # Remove chunk metadata and update mappings
+                chunks_to_remove = set(chunk_indices)
+                new_chunks_metadata = []
+                new_chunk_id_to_index = {}
+                new_document_id_to_chunks = {}
+
+                # Rebuild metadata without deleted chunks
+                for old_idx, chunk_metadata in enumerate(self.chunks_metadata):
+                    if old_idx not in chunks_to_remove:
+                        new_idx = len(new_chunks_metadata)
+                        new_chunks_metadata.append(chunk_metadata)
+                        new_chunk_id_to_index[chunk_metadata.chunk_id] = new_idx
+
+                        # Update document mappings
+                        doc_id = chunk_metadata.document_id
+                        if doc_id not in new_document_id_to_chunks:
+                            new_document_id_to_chunks[doc_id] = []
+                        new_document_id_to_chunks[doc_id].append(new_idx)
+
+                # Update internal state
+                self.chunks_metadata = new_chunks_metadata
+                self.chunk_id_to_index = new_chunk_id_to_index
+                self.document_id_to_chunks = new_document_id_to_chunks
+
+                # Rebuild FAISS index (expensive but necessary for deletion)
+                if self.chunks_metadata:
+                    logger.info("Rebuilding FAISS index after deletion...")
+                    chunk_texts = [chunk.content for chunk in self.chunks_metadata]
+                    embeddings = self.embeddings_manager.encode_batch(chunk_texts, normalize=True)
+
+                    self.index = self._initialize_index(self.embedding_dim)
+                    self.index.add(embeddings.astype(np.float32))
+                else:
+                    # Empty store
+                    self.index = None
+                    self.embedding_dim = None
+
+                # Update statistics
+                self.stats["total_chunks"] = len(self.chunks_metadata)
+                self.stats["total_documents"] = len(self.document_id_to_chunks)
+                self.stats["last_updated"] = datetime.now().isoformat()
+                self._update_index_size()
+
+                logger.info(f"Deleted document {document_id} and {len(chunk_indices)} chunks")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to delete document {document_id}: {e}")
+                return False
+
+    def save_index(self) -> bool:
+        """Save FAISS index and metadata to disk"""
+        with self._lock:
+            try:
+                # Save FAISS index
+                if self.index is not None:
+                    faiss.write_index(self.index, str(self.index_path))
+                    logger.info(f"Saved FAISS index to {self.index_path}")
+
+                # Save metadata
+                metadata_data = {
+                    "chunks": [chunk.to_dict() for chunk in self.chunks_metadata],
+                    "chunk_id_to_index": self.chunk_id_to_index,
+                    "document_id_to_chunks": self.document_id_to_chunks,
+                    "embedding_dim": self.embedding_dim,
+                    "index_type": self.index_type
+                }
+
+                with open(self.metadata_path, 'w', encoding='utf-8') as f:
+                    json.dump(metadata_data, f, indent=2, ensure_ascii=False)
+
+                # Save statistics
+                with open(self.stats_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.stats, f, indent=2)
+
+                logger.info(f"Saved vector store metadata to {self.metadata_path}")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to save vector store: {e}")
+                return False
+
+    def load_index(self) -> bool:
+        """Load FAISS index and metadata from disk"""
+        with self._lock:
+            try:
+                # Check if files exist
+                if not self.metadata_path.exists():
+                    logger.info("No existing vector store metadata found")
+                    return False
+
+                # Load metadata
+                with open(self.metadata_path, 'r', encoding='utf-8') as f:
+                    metadata_data = json.load(f)
+
+                # Restore chunks metadata
+                self.chunks_metadata = [
+                    ChunkMetadata.from_dict(chunk_data)
+                    for chunk_data in metadata_data.get("chunks", [])
+                ]
+                self.chunk_id_to_index = metadata_data.get("chunk_id_to_index", {})
+                self.document_id_to_chunks = {
+                    doc_id: indices for doc_id, indices in metadata_data.get("document_id_to_chunks", {}).items()
+                }
+                self.embedding_dim = metadata_data.get("embedding_dim")
+                self.index_type = metadata_data.get("index_type", "IndexFlatIP")
+
+                # Load FAISS index
+                if self.index_path.exists() and self.chunks_metadata:
+                    self.index = faiss.read_index(str(self.index_path))
+                    logger.info(f"Loaded FAISS index from {self.index_path}")
+                else:
+                    logger.info("No FAISS index file found or no chunks in metadata")
+
+                # Load statistics
+                if self.stats_path.exists():
+                    with open(self.stats_path, 'r', encoding='utf-8') as f:
+                        self.stats.update(json.load(f))
+                else:
+                    # Calculate statistics
+                    self.stats["total_chunks"] = len(self.chunks_metadata)
+                    self.stats["total_documents"] = len(self.document_id_to_chunks)
+                    self.stats["last_updated"] = datetime.now().isoformat()
+
+                self._update_index_size()
+
+                logger.info(f"Loaded vector store with {len(self.chunks_metadata)} chunks from {len(self.document_id_to_chunks)} documents")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to load vector store: {e}")
+                # Reset to empty state
+                self.index = None
+                self.chunks_metadata = []
+                self.chunk_id_to_index = {}
+                self.document_id_to_chunks = {}
+                self.embedding_dim = None
+                return False
