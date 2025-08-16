@@ -441,3 +441,394 @@ async def get_conversation(conversation_id: str) -> ConversationResponse:
             status_code=500,
             detail=f"Failed to get conversation: {str(e)}"
         )
+
+
+# RAG endpoints
+
+@router.post("/rag/documents", response_model=DocumentUploadResponse)
+async def upload_document(request: DocumentUploadRequest) -> DocumentUploadResponse:
+    """
+    Upload and process a document for RAG
+    """
+    try:
+        start_time = time.time()
+        logger.info(f"Processing document upload: {request.filename}")
+        
+        # Create a temporary file-like object for processing
+        import tempfile
+        import os
+        from pathlib import Path
+        
+        # Determine file extension
+        file_ext = request.file_type
+        if not request.filename.endswith(f'.{file_ext}'):
+            filename = f"{request.filename}.{file_ext}"
+        else:
+            filename = request.filename
+            
+        # Create temporary file with content
+        with tempfile.NamedTemporaryFile(mode='w', suffix=f'.{file_ext}', delete=False, encoding='utf-8') as tmp_file:
+            tmp_file.write(request.content)
+            tmp_file.flush()
+            
+            try:
+                # Process the document
+                document = document_processor.process_file(
+                    Path(tmp_file.name),
+                    custom_metadata=request.metadata
+                )
+                
+                # Override filename to use the provided one
+                document.filename = filename
+                
+                # Add to vector store
+                success = vector_store.add_document(document)
+                if not success:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to add document to vector store"
+                    )
+                
+                # Save vector store
+                vector_store.save_index()
+                
+                processing_time = time.time() - start_time
+                
+                response = DocumentUploadResponse(
+                    document_id=document.document_id,
+                    filename=document.filename,
+                    file_type=document.file_type,
+                    file_size=len(request.content),
+                    chunk_count=len(document.chunks),
+                    processing_time=processing_time,
+                    status="success"
+                )
+                
+                logger.info(f"Document processed successfully: {document.document_id} ({len(document.chunks)} chunks)")
+                return response
+                
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(tmp_file.name)
+                except Exception:
+                    pass
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Document upload failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Document processing failed: {str(e)}"
+        )
+
+
+@router.get("/rag/documents", response_model=DocumentListResponse)
+async def list_documents() -> DocumentListResponse:
+    """
+    List all stored documents
+    """
+    try:
+        # Get documents from vector store
+        vector_documents = vector_store.list_documents()
+        
+        # Get statistics
+        stats = vector_store.get_stats()
+        
+        # Convert to response format
+        documents = [
+            DocumentInfo(
+                document_id=doc["document_id"],
+                filename="",  # We don't have filename in vector store directly
+                file_type="",  # We don't have file type in vector store directly
+                chunk_count=doc["chunk_count"],
+                created_at=doc["created_at"],
+                sample_content=doc["sample_content"]
+            )
+            for doc in vector_documents
+        ]
+        
+        response = DocumentListResponse(
+            documents=documents,
+            total_count=stats["total_documents"],
+            total_chunks=stats["total_chunks"]
+        )
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Failed to list documents: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list documents: {str(e)}"
+        )
+
+
+@router.delete("/rag/documents/{document_id}")
+async def delete_document(document_id: str) -> Dict[str, Any]:
+    """
+    Delete a document and all its chunks
+    """
+    try:
+        success = vector_store.delete_document(document_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Document not found: {document_id}"
+            )
+        
+        # Save vector store after deletion
+        vector_store.save_index()
+        
+        logger.info(f"Document deleted successfully: {document_id}")
+        return {
+            "message": f"Document {document_id} deleted successfully",
+            "document_id": document_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete document: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete document: {str(e)}"
+        )
+
+
+@router.post("/rag/search", response_model=SearchResponse)
+async def search_documents(request: SearchRequest) -> SearchResponse:
+    """
+    Search documents using vector similarity
+    """
+    try:
+        start_time = time.time()
+        logger.info(f"Searching documents for query: '{request.query[:50]}...'")
+        
+        # Perform vector search
+        results = vector_store.search(
+            query=request.query,
+            k=request.k,
+            similarity_threshold=request.similarity_threshold,
+            document_ids=request.document_ids
+        )
+        
+        # Convert to response format
+        search_results = [
+            SearchResult(
+                chunk_id=result.chunk_metadata.chunk_id,
+                document_id=result.chunk_metadata.document_id,
+                content=result.chunk_metadata.content,
+                similarity_score=result.similarity_score,
+                rank=result.rank,
+                page_number=result.chunk_metadata.page_number,
+                metadata=result.chunk_metadata.chunk_metadata
+            )
+            for result in results
+        ]
+        
+        search_time = time.time() - start_time
+        
+        response = SearchResponse(
+            results=search_results,
+            query=request.query,
+            total_results=len(search_results),
+            search_time=search_time
+        )
+        
+        logger.info(f"Search completed: {len(search_results)} results in {search_time:.2f}s")
+        return response
+        
+    except Exception as e:
+        logger.error(f"Search failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Search failed: {str(e)}"
+        )
+
+
+@router.post("/rag/chat", response_model=RAGChatResponse)
+async def rag_chat(request: RAGChatRequest) -> RAGChatResponse:
+    """
+    Chat with RAG-enhanced responses
+    """
+    try:
+        logger.info(f"Received RAG chat request: '{request.message[:50]}...'")
+        
+        # Switch model if requested
+        if request.model_name and request.model_name != chat_model_manager.model_name:
+            logger.info(f"Switching to model: {request.model_name}")
+            chat_model_manager.switch_model(request.model_name)
+        
+        # Ensure model is loaded
+        if not chat_model_manager.is_loaded:
+            logger.info("Model not loaded, loading now...")
+            success = await chat_model_manager.load_model()
+            if not success:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Failed to load model"
+                )
+        
+        # Get or create conversation
+        conversation = None
+        if request.conversation_id and request.conversation_id in active_conversations:
+            conversation = active_conversations[request.conversation_id]
+        else:
+            # Create new conversation
+            system_prompt = request.system_prompt or settings.default_system_prompt
+            conversation = Conversation(
+                system_prompt=system_prompt,
+                max_length=settings.max_conversation_length
+            )
+            active_conversations[conversation.id] = conversation
+        
+        # Add user message
+        conversation.add_user_message(request.message)
+        
+        # Prepare for RAG
+        rag_used = False
+        search_results = []
+        context_length = 0
+        enhanced_message = request.message
+        
+        # Use RAG if enabled and vector store has content
+        if request.use_rag and vector_store.get_stats()["total_chunks"] > 0:
+            try:
+                # Get similar chunks for context
+                results, formatted_context = vector_store.get_similar_chunks_for_rag(
+                    query=request.message,
+                    max_chunks=request.max_chunks,
+                    similarity_threshold=request.similarity_threshold
+                )
+                
+                if results and formatted_context:
+                    # Enhance message with RAG context
+                    enhanced_message = settings.rag.context_template.format(
+                        context=formatted_context,
+                        question=request.message
+                    )
+                    
+                    # Convert results for response
+                    search_results = [
+                        SearchResult(
+                            chunk_id=result.chunk_metadata.chunk_id,
+                            document_id=result.chunk_metadata.document_id,
+                            content=result.chunk_metadata.content,
+                            similarity_score=result.similarity_score,
+                            rank=result.rank,
+                            page_number=result.chunk_metadata.page_number,
+                            metadata=result.chunk_metadata.chunk_metadata
+                        )
+                        for result in results
+                    ]
+                    
+                    rag_used = True
+                    context_length = len(formatted_context)
+                    
+                    logger.info(f"RAG context added: {len(results)} chunks, {context_length} characters")
+                    
+            except Exception as e:
+                logger.warning(f"RAG failed, falling back to normal chat: {e}")
+        
+        # Update the conversation with the enhanced message if RAG was used
+        if rag_used:
+            # Replace the last user message with enhanced version
+            conversation.messages[-1].content = enhanced_message
+        
+        # Generate response
+        result = await chat_model_manager.chat(
+            conversation=conversation,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            top_k=request.top_k,
+            stream=False  # RAG responses are not streamed
+        )
+        
+        # Update conversation in storage
+        active_conversations[conversation.id] = result["conversation"]
+        
+        response = RAGChatResponse(
+            response=result["response"],
+            conversation_id=conversation.id,
+            model_name=result["model_name"],
+            generation_time=result["generation_time"],
+            message_count=len(conversation.messages),
+            parameters=result["parameters"],
+            rag_used=rag_used,
+            search_results=search_results if rag_used else None,
+            context_length=context_length if rag_used else None
+        )
+        
+        logger.info(f"RAG chat response generated in {result['generation_time']:.2f}s (RAG: {rag_used})")
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"RAG chat failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"RAG chat failed: {str(e)}"
+        )
+
+
+@router.get("/rag/stats", response_model=VectorStoreStatsResponse)
+async def get_vector_store_stats() -> VectorStoreStatsResponse:
+    """
+    Get vector store statistics
+    """
+    try:
+        stats = vector_store.get_stats()
+        embeddings_info = embeddings_manager.get_model_info()
+        
+        response = VectorStoreStatsResponse(
+            total_chunks=stats["total_chunks"],
+            total_documents=stats["total_documents"],
+            index_size_mb=stats["index_size_mb"],
+            last_updated=stats.get("last_updated"),
+            embeddings_model=embeddings_info["model_name"],
+            embedding_dimension=embeddings_info.get("embedding_dimension")
+        )
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Failed to get vector store stats: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get vector store stats: {str(e)}"
+        )
+
+
+@router.post("/rag/clear")
+async def clear_vector_store() -> Dict[str, Any]:
+    """
+    Clear all data from the vector store
+    """
+    try:
+        success = vector_store.clear()
+        
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to clear vector store"
+            )
+        
+        logger.info("Vector store cleared successfully")
+        return {
+            "message": "Vector store cleared successfully",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to clear vector store: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to clear vector store: {str(e)}"
+        )
