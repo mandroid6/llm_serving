@@ -11,7 +11,66 @@ from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 import logging
 
+# Document parsing libraries
+import PyPDF2
+import fitz  # PyMuPDF for better PDF handling
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
+
+
+class DocumentChunk:
+    """Represents a chunk of text from a document"""
+
+    def __init__(
+        self,
+        content: str,
+        chunk_id: str,
+        document_id: str,
+        page_number: Optional[int] = None,
+        start_char: Optional[int] = None,
+        end_char: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        self.content = content
+        self.chunk_id = chunk_id
+        self.document_id = document_id
+        self.page_number = page_number
+        self.start_char = start_char
+        self.end_char = end_char
+        self.metadata = metadata or {}
+        self.created_at = datetime.now()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert chunk to dictionary for storage"""
+        return {
+            "content": self.content,
+            "chunk_id": self.chunk_id,
+            "document_id": self.document_id,
+            "page_number": self.page_number,
+            "start_char": self.start_char,
+            "end_char": self.end_char,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat()
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DocumentChunk":
+        """Create chunk from dictionary"""
+        chunk = cls(
+            content=data["content"],
+            chunk_id=data["chunk_id"],
+            document_id=data["document_id"],
+            page_number=data.get("page_number"),
+            start_char=data.get("start_char"),
+            end_char=data.get("end_char"),
+            metadata=data.get("metadata", {})
+        )
+        if "created_at" in data:
+            chunk.created_at = datetime.fromisoformat(data["created_at"])
+        return chunk
 
 
 class Document:
