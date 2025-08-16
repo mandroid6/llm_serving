@@ -492,6 +492,75 @@ class VectorStore:
                 self.embedding_dim = None
                 return False
 
+    def clear(self) -> bool:
+        """Clear all data from the vector store"""
+        with self._lock:
+            try:
+                # Clear in-memory data
+                self.index = None
+                self.chunks_metadata = []
+                self.chunk_id_to_index = {}
+                self.document_id_to_chunks = {}
+                self.embedding_dim = None
+
+                # Reset statistics
+                self.stats = {
+                    "total_chunks": 0,
+                    "total_documents": 0,
+                    "last_updated": datetime.now().isoformat(),
+                    "index_size_mb": 0.0
+                }
+
+                # Remove files
+                if self.index_path.exists():
+                    self.index_path.unlink()
+                if self.metadata_path.exists():
+                    self.metadata_path.unlink()
+                if self.stats_path.exists():
+                    self.stats_path.unlink()
+
+                logger.info("Cleared vector store")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to clear vector store: {e}")
+                return False
+
+    def _update_index_size(self):
+        """Update index size in statistics"""
+        try:
+            if self.index_path.exists():
+                size_bytes = self.index_path.stat().st_size
+                self.stats["index_size_mb"] = size_bytes / (1024 * 1024)
+            else:
+                self.stats["index_size_mb"] = 0.0
+        except Exception:
+            self.stats["index_size_mb"] = 0.0
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get vector store statistics"""
+        with self._lock:
+            self._update_index_size()
+            return self.stats.copy()
+
+    def list_documents(self) -> List[Dict[str, Any]]:
+        """List all documents in the vector store"""
+        with self._lock:
+            documents = []
+            for doc_id, chunk_indices in self.document_id_to_chunks.items():
+                if chunk_indices:
+                    # Get first chunk for document info
+                    first_chunk = self.chunks_metadata[chunk_indices[0]]
+                    documents.append({
+                        "document_id": doc_id,
+                        "chunk_count": len(chunk_indices),
+                        "created_at": first_chunk.created_at.isoformat(),
+                        "sample_content": first_chunk.content[:200] + "..." if len(first_chunk.content) > 200 else first_chunk.content
+                    })
+
+            # Sort by creation time (newest first)
+            documents.sort(key=lambda x: x["created_at"], reverse=True)
+            return documents
 
     def get_similar_chunks_for_rag(
         self,
