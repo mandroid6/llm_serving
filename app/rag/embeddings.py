@@ -206,6 +206,17 @@ class EmbeddingsManager:
             logger.error(f"Failed to find similar chunks: {e}")
             raise RuntimeError(f"Similarity search failed: {e}")
 
+    def get_model_info(self) -> Dict[str, Any]:
+        """Get information about the loaded embeddings model"""
+        return {
+            "model_name": self.model_name,
+            "device": self.device,
+            "embedding_dimension": self.embedding_dim,
+            "is_loaded": self.is_loaded,
+            "load_time": self.load_time,
+            "max_sequence_length": getattr(self.model, 'max_seq_length', None) if self.model else None
+        }
+
 
 # Global embeddings manager instance
 embeddings_manager = EmbeddingsManager()
