@@ -250,3 +250,28 @@ class VectorStore:
             except Exception as e:
                 logger.error(f"Failed to add document {document.document_id}: {e}")
                 return False
+
+
+    def get_chunk_by_id(self, chunk_id: str) -> Optional[ChunkMetadata]:
+        """Get chunk metadata by chunk ID"""
+        with self._lock:
+            if chunk_id in self.chunk_id_to_index:
+                idx = self.chunk_id_to_index[chunk_id]
+                if idx < len(self.chunks_metadata):
+                    return self.chunks_metadata[idx]
+            return None
+
+    def get_chunks_by_document_id(self, document_id: str) -> List[ChunkMetadata]:
+        """Get all chunks for a document"""
+        with self._lock:
+            if document_id not in self.document_id_to_chunks:
+                return []
+
+            chunk_indices = self.document_id_to_chunks[document_id]
+            chunks = []
+
+            for idx in chunk_indices:
+                if idx < len(self.chunks_metadata):
+                    chunks.append(self.chunks_metadata[idx])
+
+            return chunks
