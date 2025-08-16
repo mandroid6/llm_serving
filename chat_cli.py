@@ -30,10 +30,10 @@ from prompt_toolkit.shortcuts import confirm
 
 # Enhanced keyboard handling for voice mode
 try:
-    import keyboard
-    KEYBOARD_AVAILABLE = True
+    from pynput import keyboard as pynput_keyboard
+    PYNPUT_AVAILABLE = True
 except ImportError:
-    KEYBOARD_AVAILABLE = False
+    PYNPUT_AVAILABLE = False
 
 # Voice input support (optional)
 try:
@@ -55,12 +55,13 @@ console = Console()
 
 
 class VoiceExitHandler:
-    """Handles graceful exit from voice mode using Esc key"""
+    """Handles graceful exit from voice mode using Esc key (no admin privileges required)"""
     
     def __init__(self):
         self.exit_requested = False
         self.monitoring = False
         self._stop_event = threading.Event()
+        self._listener = None
         
     def start_monitoring(self):
         """Start monitoring for Esc key press"""
@@ -68,68 +69,55 @@ class VoiceExitHandler:
         self.monitoring = True
         self._stop_event.clear()
         
-        if KEYBOARD_AVAILABLE:
-            # Use keyboard library if available
-            self._start_keyboard_monitoring()
+        if PYNPUT_AVAILABLE:
+            # Use pynput library if available (works without admin privileges)
+            self._start_pynput_monitoring()
         else:
-            # Fallback: use simple input monitoring
-            self._start_input_monitoring()
+            # Fallback: use a simple flag-based approach
+            self._start_simple_monitoring()
     
     def stop_monitoring(self):
         """Stop monitoring for key presses"""
         self.monitoring = False
         self._stop_event.set()
         
-        if KEYBOARD_AVAILABLE:
+        if self._listener:
             try:
-                keyboard.unhook_all()
+                self._listener.stop()
+                self._listener = None
             except:
                 pass
     
-    def _start_keyboard_monitoring(self):
-        """Monitor using keyboard library"""
-        def on_key_event(e):
-            if e.event_type == keyboard.KEY_DOWN and e.name == 'esc':
-                self.exit_requested = True
-                self.monitoring = False
+    def _start_pynput_monitoring(self):
+        """Monitor using pynput library (no admin privileges required)"""
+        def on_key_press(key):
+            try:
+                if key == pynput_keyboard.Key.esc:
+                    self.exit_requested = True
+                    self.monitoring = False
+                    return False  # Stop listener
+            except Exception:
+                pass
+        
+        def on_key_release(key):
+            pass
         
         try:
-            keyboard.on_press_key('esc', lambda _: setattr(self, 'exit_requested', True))
+            self._listener = pynput_keyboard.Listener(
+                on_press=on_key_press,
+                on_release=on_key_release,
+                suppress=False  # Don't suppress the key, just detect it
+            )
+            self._listener.start()
         except Exception:
-            # Fallback to input monitoring if keyboard fails
-            self._start_input_monitoring()
+            # If pynput fails, fall back to simple monitoring
+            self._start_simple_monitoring()
     
-    def _start_input_monitoring(self):
-        """Fallback input monitoring using threading"""
-        def monitor_input():
-            import select
-            import termios
-            import tty
-            
-            try:
-                old_settings = termios.tcgetattr(sys.stdin)
-                tty.setraw(sys.stdin.fileno())
-                
-                while self.monitoring and not self._stop_event.is_set():
-                    if select.select([sys.stdin], [], [], 0.1) == ([sys.stdin], [], []):
-                        char = sys.stdin.read(1)
-                        if ord(char) == 27:  # ESC key
-                            self.exit_requested = True
-                            self.monitoring = False
-                            break
-                            
-            except Exception:
-                # If terminal control fails, just wait for stop event
-                self._stop_event.wait(0.1)
-            finally:
-                try:
-                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-                except:
-                    pass
-        
-        # Start monitoring in background thread
-        monitor_thread = threading.Thread(target=monitor_input, daemon=True)
-        monitor_thread.start()
+    def _start_simple_monitoring(self):
+        """Simple fallback monitoring using a timeout-based approach"""
+        # For this fallback, we'll check periodically and rely on
+        # the user understanding they can press Ctrl+C instead
+        pass
     
     def is_exit_requested(self) -> bool:
         """Check if exit was requested"""
@@ -140,6 +128,17 @@ class VoiceExitHandler:
         self.exit_requested = False
         self.monitoring = False
         self._stop_event.clear()
+        if self._listener:
+            try:
+                self._listener.stop()
+                self._listener = None
+            except:
+                pass
+    
+    def request_exit(self):
+        """Manually request exit (for fallback methods)"""
+        self.exit_requested = True
+        self.monitoring = False
 
 
 class ChatAPI:
@@ -328,7 +327,7 @@ class ChatInterface:
         
         if self.voice_enabled:
             voice_status = "\n[green]🎤 Voice input enabled[/green]"
-            esc_note = " (Esc to exit)" if KEYBOARD_AVAILABLE else ""
+            esc_note = " (Esc to exit)" if PYNPUT_AVAILABLE else ""
             voice_commands = f"""• [cyan]/voice[/cyan] - Toggle voice input mode{esc_note}
 • [cyan]/record[/cyan] - Record a voice message
 • [cyan]/voice-settings[/cyan] - Voice configuration
@@ -659,92 +658,116 @@ class ChatInterface:
         ).strip()
     
     async def get_voice_input(self) -> Optional[str]:
-        """Get voice input from user with real-time feedback and Esc key support"""
+        """Get voice input from user with real-time feedback, Esc key support, and retry limit"""
         if not self.voice_enabled or not self.voice_manager:
             console.print("[red]❌ Voice input not available")
             return None
         
-        try:
-            # Start monitoring for Esc key
-            self.voice_exit_handler.start_monitoring()
+        max_attempts = 2
+        attempt = 0
+        
+        while attempt < max_attempts:
+            attempt += 1
             
-            # Show recording interface with enhanced feedback
-            esc_instruction = "Press [bold red]Esc[/bold red] to exit voice mode" if KEYBOARD_AVAILABLE else "Press [bold red]Ctrl+C[/bold red] to cancel"
-            console.print(f"[bold green]🎤 Recording... (speak now, will auto-stop on silence)[/bold green]")
-            console.print(f"[dim]{esc_instruction}[/dim]")
-            
-            # Create a more interactive recording display
-            from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
-            
-            with Progress(
-                TextColumn("[bold blue]🎤 Recording"),
-                BarColumn(bar_width=40, style="green", complete_style="green"),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                TimeRemainingColumn(),
-                console=console,
-                transient=True
-            ) as progress:
+            try:
+                # Start monitoring for Esc key
+                self.voice_exit_handler.start_monitoring()
                 
-                # Add progress task
-                recording_task = progress.add_task(
-                    "Recording audio...", 
-                    total=self.voice_manager.max_recording_time
-                )
+                # Show recording interface with enhanced feedback
+                if PYNPUT_AVAILABLE:
+                    esc_instruction = "Press [bold red]Esc[/bold red] to exit voice mode"
+                else:
+                    esc_instruction = "Press [bold red]Ctrl+C[/bold red] to cancel"
                 
-                # Start recording with progress updates
-                start_time = time.time()
+                # Show attempt number if retrying
+                attempt_info = f" (Attempt {attempt}/{max_attempts})" if attempt > 1 else ""
+                console.print(f"[bold green]🎤 Recording...{attempt_info} (speak now, will auto-stop on silence)[/bold green]")
+                console.print(f"[dim]{esc_instruction}[/dim]")
                 
-                # Create a custom recording method with progress and exit handling
-                recording_future = asyncio.create_task(
-                    self.voice_manager.get_voice_input(mode=VoiceInputMode.AUTO_STOP)
-                )
+                # Create a more interactive recording display
+                from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
                 
-                # Update progress while recording and check for exit
-                while not recording_future.done():
-                    # Check if user pressed Esc
-                    if self.voice_exit_handler.is_exit_requested():
-                        console.print("\n[yellow]⚠️ Voice mode exited (Esc pressed)[/yellow]")
-                        self.voice_manager.stop_recording()
-                        recording_future.cancel()
-                        self.voice_mode = False  # Exit voice mode
-                        return None
+                with Progress(
+                    TextColumn("[bold blue]🎤 Recording"),
+                    BarColumn(bar_width=40, style="green", complete_style="green"),
+                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                    TimeRemainingColumn(),
+                    console=console,
+                    transient=True
+                ) as progress:
                     
-                    elapsed = time.time() - start_time
-                    progress.update(recording_task, completed=elapsed)
+                    # Add progress task
+                    recording_task = progress.add_task(
+                        "Recording audio...", 
+                        total=self.voice_manager.max_recording_time
+                    )
                     
-                    # Show audio level if available
+                    # Start recording with progress updates
+                    start_time = time.time()
+                    
+                    # Create a custom recording method with progress and exit handling
+                    recording_future = asyncio.create_task(
+                        self.voice_manager.get_voice_input(mode=VoiceInputMode.AUTO_STOP)
+                    )
+                    
+                    # Update progress while recording and check for exit
+                    while not recording_future.done():
+                        # Check if user pressed Esc
+                        if self.voice_exit_handler.is_exit_requested():
+                            console.print("\n[yellow]⚠️ Voice mode exited (Esc pressed)[/yellow]")
+                            self.voice_manager.stop_recording()
+                            recording_future.cancel()
+                            self.voice_mode = False  # Exit voice mode
+                            return None
+                        
+                        elapsed = time.time() - start_time
+                        progress.update(recording_task, completed=elapsed)
+                        
+                        # Show audio level if available
+                        try:
+                            level = self.voice_manager.get_current_audio_level()
+                            level_bars = self._get_audio_level_bars(level)
+                            progress.update(recording_task, description=f"🎤 Recording {level_bars}")
+                        except:
+                            pass
+                        
+                        await asyncio.sleep(0.1)
+                    
+                    # Get the result if recording completed normally
                     try:
-                        level = self.voice_manager.get_current_audio_level()
-                        level_bars = self._get_audio_level_bars(level)
-                        progress.update(recording_task, description=f"🎤 Recording {level_bars}")
-                    except:
-                        pass
-                    
-                    await asyncio.sleep(0.1)
+                        text = await recording_future
+                    except asyncio.CancelledError:
+                        return None
                 
-                # Get the result if recording completed normally
-                try:
-                    text = await recording_future
-                except asyncio.CancelledError:
-                    return None
-            
-            if text:
-                console.print(f"[dim]📝 Transcribed: {text}[/dim]")
-                return text
-            else:
-                console.print("[yellow]⚠️ No speech detected or transcription failed")
+                if text and text.strip():
+                    console.print(f"[dim]📝 Transcribed: {text}[/dim]")
+                    return text
+                else:
+                    # No speech detected
+                    if attempt < max_attempts:
+                        console.print(f"[yellow]⚠️ No speech detected. Retrying... ({attempt}/{max_attempts})[/yellow]")
+                        await asyncio.sleep(0.5)  # Brief pause before retry
+                    else:
+                        console.print(f"[yellow]⚠️ No speech detected after {max_attempts} attempts.[/yellow]")
+                        console.print("[dim]💡 Tip: Speak closer to your microphone or check /voice-settings[/dim]")
+                        
+                        # Optionally exit voice mode after failed attempts
+                        self.voice_mode = False
+                        console.print("[dim]Returning to text input mode[/dim]")
+                        return None
+                        
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Recording cancelled[/yellow]")
+                self.voice_manager.stop_recording()
                 return None
-                
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Recording cancelled[/yellow]")
-            self.voice_manager.stop_recording()
-            return None
-        except Exception as e:
-            console.print(f"[red]❌ Voice input error: {e}")
-            return None
-        finally:
-            # Always stop monitoring when done
-            self.voice_exit_handler.stop_monitoring()
+            except Exception as e:
+                console.print(f"[red]❌ Voice input error: {e}")
+                return None
+            finally:
+                # Always stop monitoring when done with this attempt
+                self.voice_exit_handler.stop_monitoring()
+        
+        return None
     
     def _get_audio_level_bars(self, level: float) -> str:
         """Create audio level visualization bars"""
@@ -777,7 +800,7 @@ class ChatInterface:
         icon = "🎤" if self.voice_mode else "⌨️"
         
         if self.voice_mode:
-            esc_info = " (Esc to exit voice mode)" if KEYBOARD_AVAILABLE else " (Ctrl+C to cancel)"
+            esc_info = " (Esc to exit voice mode)" if PYNPUT_AVAILABLE else " (Ctrl+C to cancel)"
             console.print(f"[green]✅ Switched to {mode} input mode {icon}{esc_info}")
             console.print("[dim]Speak naturally and the system will auto-detect when you finish[/dim]")
         else:
@@ -786,81 +809,100 @@ class ChatInterface:
             self.voice_exit_handler.reset()
     
     async def record_voice_message(self):
-        """Record a single voice message and send it with Esc key support"""
+        """Record a single voice message and send it with Esc key support and retry limit"""
         if not self.voice_enabled:
             console.print("[red]❌ Voice input not available")
             return
         
-        try:
-            # Start monitoring for Esc key
-            self.voice_exit_handler.start_monitoring()
+        max_attempts = 2
+        attempt = 0
+        
+        while attempt < max_attempts:
+            attempt += 1
             
-            esc_instruction = "Press [bold red]Esc[/bold red] to cancel" if KEYBOARD_AVAILABLE else "Press [bold red]Ctrl+C[/bold red] to cancel"
-            console.print(f"[bold green]🎤 Recording voice message... (speak now, will auto-stop on silence)[/bold green]")
-            console.print(f"[dim]{esc_instruction}[/dim]")
-            
-            # Use the same enhanced recording interface
-            from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
-            
-            with Progress(
-                TextColumn("[bold blue]🎤 Voice Message"),
-                BarColumn(bar_width=40, style="green", complete_style="green"),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                TimeRemainingColumn(),
-                console=console,
-                transient=True
-            ) as progress:
+            try:
+                # Start monitoring for Esc key
+                self.voice_exit_handler.start_monitoring()
                 
-                recording_task = progress.add_task(
-                    "Recording...", 
-                    total=self.voice_manager.max_recording_time
-                )
+                esc_instruction = "Press [bold red]Esc[/bold red] to cancel" if PYNPUT_AVAILABLE else "Press [bold red]Ctrl+C[/bold red] to cancel"
                 
-                start_time = time.time()
-                recording_future = asyncio.create_task(
-                    self.voice_manager.get_voice_input(mode=VoiceInputMode.AUTO_STOP)
-                )
+                # Show attempt number if retrying
+                attempt_info = f" (Attempt {attempt}/{max_attempts})" if attempt > 1 else ""
+                console.print(f"[bold green]🎤 Recording voice message...{attempt_info} (speak now, will auto-stop on silence)[/bold green]")
+                console.print(f"[dim]{esc_instruction}[/dim]")
                 
-                while not recording_future.done():
-                    # Check if user pressed Esc
-                    if self.voice_exit_handler.is_exit_requested():
-                        console.print("\n[yellow]⚠️ Recording cancelled (Esc pressed)[/yellow]")
-                        self.voice_manager.stop_recording()
-                        recording_future.cancel()
+                # Use the same enhanced recording interface
+                from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+                
+                with Progress(
+                    TextColumn("[bold blue]🎤 Voice Message"),
+                    BarColumn(bar_width=40, style="green", complete_style="green"),
+                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                    TimeRemainingColumn(),
+                    console=console,
+                    transient=True
+                ) as progress:
+                    
+                    recording_task = progress.add_task(
+                        "Recording...", 
+                        total=self.voice_manager.max_recording_time
+                    )
+                    
+                    start_time = time.time()
+                    recording_future = asyncio.create_task(
+                        self.voice_manager.get_voice_input(mode=VoiceInputMode.AUTO_STOP)
+                    )
+                    
+                    while not recording_future.done():
+                        # Check if user pressed Esc
+                        if self.voice_exit_handler.is_exit_requested():
+                            console.print("\n[yellow]⚠️ Recording cancelled (Esc pressed)[/yellow]")
+                            self.voice_manager.stop_recording()
+                            recording_future.cancel()
+                            return
+                        
+                        elapsed = time.time() - start_time
+                        progress.update(recording_task, completed=elapsed)
+                        
+                        try:
+                            level = self.voice_manager.get_current_audio_level()
+                            level_bars = self._get_audio_level_bars(level)
+                            progress.update(recording_task, description=f"🎤 Voice Message {level_bars}")
+                        except:
+                            pass
+                        
+                        await asyncio.sleep(0.1)
+                    
+                    # Get the result if recording completed normally
+                    try:
+                        text = await recording_future
+                    except asyncio.CancelledError:
+                        return
+                
+                if text and text.strip():
+                    console.print(f"[dim]📝 Transcribed: {text}[/dim]")
+                    await self.send_message(text)
+                    return  # Success, exit the retry loop
+                else:
+                    # No speech detected
+                    if attempt < max_attempts:
+                        console.print(f"[yellow]⚠️ No speech detected. Retrying... ({attempt}/{max_attempts})[/yellow]")
+                        await asyncio.sleep(0.5)  # Brief pause before retry
+                    else:
+                        console.print(f"[yellow]⚠️ No speech detected after {max_attempts} attempts.[/yellow]")
+                        console.print("[dim]💡 Tip: Speak closer to your microphone or check /voice-settings[/dim]")
                         return
                     
-                    elapsed = time.time() - start_time
-                    progress.update(recording_task, completed=elapsed)
-                    
-                    try:
-                        level = self.voice_manager.get_current_audio_level()
-                        level_bars = self._get_audio_level_bars(level)
-                        progress.update(recording_task, description=f"🎤 Voice Message {level_bars}")
-                    except:
-                        pass
-                    
-                    await asyncio.sleep(0.1)
-                
-                # Get the result if recording completed normally
-                try:
-                    text = await recording_future
-                except asyncio.CancelledError:
-                    return
-            
-            if text:
-                console.print(f"[dim]📝 Transcribed: {text}[/dim]")
-                await self.send_message(text)
-            else:
-                console.print("[yellow]⚠️ No speech detected or transcription failed")
-                
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Recording cancelled[/yellow]")
-            self.voice_manager.stop_recording()
-        except Exception as e:
-            console.print(f"[red]❌ Voice recording error: {e}")
-        finally:
-            # Always stop monitoring when done
-            self.voice_exit_handler.stop_monitoring()
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Recording cancelled[/yellow]")
+                self.voice_manager.stop_recording()
+                return
+            except Exception as e:
+                console.print(f"[red]❌ Voice recording error: {e}")
+                return
+            finally:
+                # Always stop monitoring when done with this attempt
+                self.voice_exit_handler.stop_monitoring()
     
     def show_voice_settings(self):
         """Display voice input settings"""
@@ -887,7 +929,7 @@ class ChatInterface:
         
         # Voice mode status with Esc key info
         mode_status = "[green]Voice mode[/green]" if self.voice_mode else "[dim]Text mode[/dim]"
-        esc_info = " ([red]Esc[/red] to exit)" if self.voice_mode and KEYBOARD_AVAILABLE else ""
+        esc_info = " ([red]Esc[/red] to exit)" if self.voice_mode and PYNPUT_AVAILABLE else ""
         
         settings_text = f"""
 [bold]🎤 Voice Input Settings[/bold]
@@ -922,10 +964,11 @@ class ChatInterface:
 [bold]💡 Voice Input Tips:[/bold]
 • Speak clearly after the recording starts
 • Voice mode auto-stops on silence
+• System retries up to 2 times if no speech detected
 • All transcription happens locally (offline)
 • Use /devices to see available microphones
 • Try different Whisper models for better accuracy
-{"• Press Esc anytime to exit voice mode gracefully" if KEYBOARD_AVAILABLE else "• Press Ctrl+C to cancel recording"}
+{"• Press Esc anytime to exit voice mode gracefully" if PYNPUT_AVAILABLE else "• Press Ctrl+C to cancel recording"}
         """
         
         console.print(Panel(settings_text, title="🎤 Voice Settings", border_style="green"))
@@ -1012,9 +1055,10 @@ class ChatInterface:
 [cyan]/voice-settings[/cyan] - Show voice configuration
 [cyan]/devices[/cyan] - List audio input devices
 """
-            esc_support = "• Press Esc to exit voice mode gracefully" if KEYBOARD_AVAILABLE else "• Press Ctrl+C to cancel voice recording"
+            esc_support = "• Press Esc to exit voice mode gracefully" if PYNPUT_AVAILABLE else "• Press Ctrl+C to cancel voice recording"
             voice_tips = f"""• Use /voice to toggle between text and voice input
 • Voice input auto-stops on silence detection
+• System retries up to 2 times if no speech detected
 • All transcription happens locally (offline)
 {esc_support}
 • """
