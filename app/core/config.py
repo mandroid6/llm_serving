@@ -60,6 +60,36 @@ class VoiceSettings(BaseModel):
     suppress_warnings: bool = True
 
 
+class RAGSettings(BaseModel):
+    """RAG (Retrieval-Augmented Generation) configuration"""
+    enabled: bool = True
+    
+    # Document storage settings
+    documents_dir: str = "./documents"
+    vector_db_dir: str = "./vector_db"
+    max_file_size_mb: int = 50  # Maximum file size in MB
+    supported_formats: List[str] = ["pdf", "txt", "md"]
+    
+    # Text processing settings
+    chunk_size: int = 1000  # Characters per chunk
+    chunk_overlap: int = 200  # Overlap between chunks
+    min_chunk_size: int = 100  # Minimum chunk size to keep
+    
+    # Embeddings settings
+    embeddings_model: str = "all-MiniLM-L6-v2"  # Sentence-transformers model
+    embeddings_device: str = "cpu"  # Device for embeddings computation
+    
+    # Vector search settings
+    similarity_threshold: float = 0.7  # Minimum similarity for relevant chunks
+    max_chunks_per_query: int = 5  # Maximum chunks to include in context
+    rerank_chunks: bool = True  # Whether to rerank chunks by relevance
+    
+    # RAG generation settings
+    include_source_references: bool = True  # Include source info in responses
+    max_context_length: int = 4000  # Maximum context length for RAG
+    context_template: str = "Based on the following documents:\n\n{context}\n\nQuestion: {question}\n\nAnswer:"
+
+
 class Settings(BaseSettings):
     """Application settings with chat support"""
 
@@ -87,6 +117,9 @@ class Settings(BaseSettings):
     
     # Voice input settings
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    
+    # RAG settings
+    rag: RAGSettings = Field(default_factory=RAGSettings)
 
     # Performance Settings
     torch_threads: int = 1
