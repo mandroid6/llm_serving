@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import argparse
+import threading
 
 import httpx
 from rich.console import Console
@@ -26,6 +27,13 @@ from prompt_toolkit import prompt as toolkit_prompt
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import confirm
+
+# Enhanced keyboard handling for voice mode
+try:
+    import keyboard
+    KEYBOARD_AVAILABLE = True
+except ImportError:
+    KEYBOARD_AVAILABLE = False
 
 # Voice input support (optional)
 try:
@@ -44,6 +52,94 @@ CONVERSATIONS_DIR = Path("./conversations")
 CONVERSATIONS_DIR.mkdir(exist_ok=True)
 
 console = Console()
+
+
+class VoiceExitHandler:
+    """Handles graceful exit from voice mode using Esc key"""
+    
+    def __init__(self):
+        self.exit_requested = False
+        self.monitoring = False
+        self._stop_event = threading.Event()
+        
+    def start_monitoring(self):
+        """Start monitoring for Esc key press"""
+        self.exit_requested = False
+        self.monitoring = True
+        self._stop_event.clear()
+        
+        if KEYBOARD_AVAILABLE:
+            # Use keyboard library if available
+            self._start_keyboard_monitoring()
+        else:
+            # Fallback: use simple input monitoring
+            self._start_input_monitoring()
+    
+    def stop_monitoring(self):
+        """Stop monitoring for key presses"""
+        self.monitoring = False
+        self._stop_event.set()
+        
+        if KEYBOARD_AVAILABLE:
+            try:
+                keyboard.unhook_all()
+            except:
+                pass
+    
+    def _start_keyboard_monitoring(self):
+        """Monitor using keyboard library"""
+        def on_key_event(e):
+            if e.event_type == keyboard.KEY_DOWN and e.name == 'esc':
+                self.exit_requested = True
+                self.monitoring = False
+        
+        try:
+            keyboard.on_press_key('esc', lambda _: setattr(self, 'exit_requested', True))
+        except Exception:
+            # Fallback to input monitoring if keyboard fails
+            self._start_input_monitoring()
+    
+    def _start_input_monitoring(self):
+        """Fallback input monitoring using threading"""
+        def monitor_input():
+            import select
+            import termios
+            import tty
+            
+            try:
+                old_settings = termios.tcgetattr(sys.stdin)
+                tty.setraw(sys.stdin.fileno())
+                
+                while self.monitoring and not self._stop_event.is_set():
+                    if select.select([sys.stdin], [], [], 0.1) == ([sys.stdin], [], []):
+                        char = sys.stdin.read(1)
+                        if ord(char) == 27:  # ESC key
+                            self.exit_requested = True
+                            self.monitoring = False
+                            break
+                            
+            except Exception:
+                # If terminal control fails, just wait for stop event
+                self._stop_event.wait(0.1)
+            finally:
+                try:
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                except:
+                    pass
+        
+        # Start monitoring in background thread
+        monitor_thread = threading.Thread(target=monitor_input, daemon=True)
+        monitor_thread.start()
+    
+    def is_exit_requested(self) -> bool:
+        """Check if exit was requested"""
+        return self.exit_requested
+    
+    def reset(self):
+        """Reset the handler"""
+        self.exit_requested = False
+        self.monitoring = False
+        self._stop_event.clear()
 
 
 class ChatAPI:
@@ -157,6 +253,7 @@ class ChatInterface:
         self.voice_manager = None
         self.voice_enabled = False
         self.voice_mode = False  # Toggle between text and voice input
+        self.voice_exit_handler = VoiceExitHandler()  # Handle Esc key for voice mode
         
         # Initialize voice input if available
         if VOICE_AVAILABLE:
@@ -231,7 +328,8 @@ class ChatInterface:
         
         if self.voice_enabled:
             voice_status = "\n[green]🎤 Voice input enabled[/green]"
-            voice_commands = """• [cyan]/voice[/cyan] - Toggle voice input mode
+            esc_note = " (Esc to exit)" if KEYBOARD_AVAILABLE else ""
+            voice_commands = f"""• [cyan]/voice[/cyan] - Toggle voice input mode{esc_note}
 • [cyan]/record[/cyan] - Record a voice message
 • [cyan]/voice-settings[/cyan] - Voice configuration
 """
@@ -561,15 +659,19 @@ class ChatInterface:
         ).strip()
     
     async def get_voice_input(self) -> Optional[str]:
-        """Get voice input from user with real-time feedback"""
+        """Get voice input from user with real-time feedback and Esc key support"""
         if not self.voice_enabled or not self.voice_manager:
             console.print("[red]❌ Voice input not available")
             return None
         
         try:
+            # Start monitoring for Esc key
+            self.voice_exit_handler.start_monitoring()
+            
             # Show recording interface with enhanced feedback
-            console.print("[bold green]🎤 Recording... (speak now, will auto-stop on silence)[/bold green]")
-            console.print("[dim]Press Ctrl+C to cancel recording[/dim]")
+            esc_instruction = "Press [bold red]Esc[/bold red] to exit voice mode" if KEYBOARD_AVAILABLE else "Press [bold red]Ctrl+C[/bold red] to cancel"
+            console.print(f"[bold green]🎤 Recording... (speak now, will auto-stop on silence)[/bold green]")
+            console.print(f"[dim]{esc_instruction}[/dim]")
             
             # Create a more interactive recording display
             from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
@@ -592,13 +694,21 @@ class ChatInterface:
                 # Start recording with progress updates
                 start_time = time.time()
                 
-                # Create a custom recording method with progress
+                # Create a custom recording method with progress and exit handling
                 recording_future = asyncio.create_task(
                     self.voice_manager.get_voice_input(mode=VoiceInputMode.AUTO_STOP)
                 )
                 
-                # Update progress while recording
+                # Update progress while recording and check for exit
                 while not recording_future.done():
+                    # Check if user pressed Esc
+                    if self.voice_exit_handler.is_exit_requested():
+                        console.print("\n[yellow]⚠️ Voice mode exited (Esc pressed)[/yellow]")
+                        self.voice_manager.stop_recording()
+                        recording_future.cancel()
+                        self.voice_mode = False  # Exit voice mode
+                        return None
+                    
                     elapsed = time.time() - start_time
                     progress.update(recording_task, completed=elapsed)
                     
@@ -612,7 +722,11 @@ class ChatInterface:
                     
                     await asyncio.sleep(0.1)
                 
-                text = await recording_future
+                # Get the result if recording completed normally
+                try:
+                    text = await recording_future
+                except asyncio.CancelledError:
+                    return None
             
             if text:
                 console.print(f"[dim]📝 Transcribed: {text}[/dim]")
@@ -628,6 +742,9 @@ class ChatInterface:
         except Exception as e:
             console.print(f"[red]❌ Voice input error: {e}")
             return None
+        finally:
+            # Always stop monitoring when done
+            self.voice_exit_handler.stop_monitoring()
     
     def _get_audio_level_bars(self, level: float) -> str:
         """Create audio level visualization bars"""
@@ -658,17 +775,29 @@ class ChatInterface:
         self.voice_mode = not self.voice_mode
         mode = "voice" if self.voice_mode else "text"
         icon = "🎤" if self.voice_mode else "⌨️"
-        console.print(f"[green]✅ Switched to {mode} input mode {icon}")
+        
+        if self.voice_mode:
+            esc_info = " (Esc to exit voice mode)" if KEYBOARD_AVAILABLE else " (Ctrl+C to cancel)"
+            console.print(f"[green]✅ Switched to {mode} input mode {icon}{esc_info}")
+            console.print("[dim]Speak naturally and the system will auto-detect when you finish[/dim]")
+        else:
+            console.print(f"[green]✅ Switched to {mode} input mode {icon}")
+            # Reset the exit handler when leaving voice mode
+            self.voice_exit_handler.reset()
     
     async def record_voice_message(self):
-        """Record a single voice message and send it"""
+        """Record a single voice message and send it with Esc key support"""
         if not self.voice_enabled:
             console.print("[red]❌ Voice input not available")
             return
         
         try:
-            console.print("[bold green]🎤 Recording voice message... (speak now, will auto-stop on silence)[/bold green]")
-            console.print("[dim]Press Ctrl+C to cancel recording[/dim]")
+            # Start monitoring for Esc key
+            self.voice_exit_handler.start_monitoring()
+            
+            esc_instruction = "Press [bold red]Esc[/bold red] to cancel" if KEYBOARD_AVAILABLE else "Press [bold red]Ctrl+C[/bold red] to cancel"
+            console.print(f"[bold green]🎤 Recording voice message... (speak now, will auto-stop on silence)[/bold green]")
+            console.print(f"[dim]{esc_instruction}[/dim]")
             
             # Use the same enhanced recording interface
             from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
@@ -693,6 +822,13 @@ class ChatInterface:
                 )
                 
                 while not recording_future.done():
+                    # Check if user pressed Esc
+                    if self.voice_exit_handler.is_exit_requested():
+                        console.print("\n[yellow]⚠️ Recording cancelled (Esc pressed)[/yellow]")
+                        self.voice_manager.stop_recording()
+                        recording_future.cancel()
+                        return
+                    
                     elapsed = time.time() - start_time
                     progress.update(recording_task, completed=elapsed)
                     
@@ -705,7 +841,11 @@ class ChatInterface:
                     
                     await asyncio.sleep(0.1)
                 
-                text = await recording_future
+                # Get the result if recording completed normally
+                try:
+                    text = await recording_future
+                except asyncio.CancelledError:
+                    return
             
             if text:
                 console.print(f"[dim]📝 Transcribed: {text}[/dim]")
@@ -718,6 +858,9 @@ class ChatInterface:
             self.voice_manager.stop_recording()
         except Exception as e:
             console.print(f"[red]❌ Voice recording error: {e}")
+        finally:
+            # Always stop monitoring when done
+            self.voice_exit_handler.stop_monitoring()
     
     def show_voice_settings(self):
         """Display voice input settings"""
@@ -742,14 +885,15 @@ class ChatInterface:
                     current_device_name = device['name']
                     break
         
-        # Voice mode status
+        # Voice mode status with Esc key info
         mode_status = "[green]Voice mode[/green]" if self.voice_mode else "[dim]Text mode[/dim]"
+        esc_info = " ([red]Esc[/red] to exit)" if self.voice_mode and KEYBOARD_AVAILABLE else ""
         
         settings_text = f"""
 [bold]🎤 Voice Input Settings[/bold]
 
 [bold]Current Status:[/bold]
-• Input mode: {mode_status}
+• Input mode: {mode_status}{esc_info}
 • Voice input: [green]{'Enabled' if status['is_enabled'] else 'Disabled'}[/green]
 • Recording: [red]{'Active' if status['is_recording'] else 'Idle'}[/red]
 
@@ -781,6 +925,7 @@ class ChatInterface:
 • All transcription happens locally (offline)
 • Use /devices to see available microphones
 • Try different Whisper models for better accuracy
+{"• Press Esc anytime to exit voice mode gracefully" if KEYBOARD_AVAILABLE else "• Press Ctrl+C to cancel recording"}
         """
         
         console.print(Panel(settings_text, title="🎤 Voice Settings", border_style="green"))
@@ -867,9 +1012,11 @@ class ChatInterface:
 [cyan]/voice-settings[/cyan] - Show voice configuration
 [cyan]/devices[/cyan] - List audio input devices
 """
-            voice_tips = """• Use /voice to toggle between text and voice input
+            esc_support = "• Press Esc to exit voice mode gracefully" if KEYBOARD_AVAILABLE else "• Press Ctrl+C to cancel voice recording"
+            voice_tips = f"""• Use /voice to toggle between text and voice input
 • Voice input auto-stops on silence detection
 • All transcription happens locally (offline)
+{esc_support}
 • """
         
         help_text = f"""
