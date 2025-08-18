@@ -286,3 +286,139 @@ class VectorStoreStatsResponse(BaseModel):
     last_updated: Optional[str] = Field(None, description="Last update timestamp")
     embeddings_model: str = Field(..., description="Embeddings model name")
     embedding_dimension: Optional[int] = Field(None, description="Embedding vector dimension")
+
+
+class DocumentDeleteRequest(BaseModel):
+    """Request model for document deletion"""
+    
+    document_id: str = Field(..., description="Document ID to delete", min_length=1)
+    hard_delete: Optional[bool] = Field(False, description="Permanently delete (vs soft delete)")
+    
+    @validator('document_id')
+    def validate_document_id(cls, v):
+        if not v.strip():
+            raise ValueError('Document ID cannot be empty')
+        return v.strip()
+
+
+class DocumentDeleteResponse(BaseModel):
+    """Response model for document deletion"""
+    
+    document_id: str = Field(..., description="Deleted document ID")
+    status: str = Field(..., description="Deletion status")
+    deleted_chunks: int = Field(..., description="Number of chunks deleted")
+    message: str = Field(..., description="Success message")
+
+
+class DocumentChunkInfo(BaseModel):
+    """Information about a document chunk"""
+    
+    chunk_id: str = Field(..., description="Chunk ID")
+    content: str = Field(..., description="Chunk content")
+    page_number: Optional[int] = Field(None, description="Page number (for PDFs)")
+    start_char: Optional[int] = Field(None, description="Start character position")
+    end_char: Optional[int] = Field(None, description="End character position")
+    chunk_index: int = Field(..., description="Chunk index in document")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional chunk metadata")
+
+
+class DocumentChunksResponse(BaseModel):
+    """Response model for document chunks preview"""
+    
+    document_id: str = Field(..., description="Document ID")
+    filename: str = Field(..., description="Document filename")
+    chunks: List[DocumentChunkInfo] = Field(..., description="Document chunks")
+    total_chunks: int = Field(..., description="Total number of chunks")
+    chunk_size: int = Field(..., description="Chunk size used")
+    chunk_overlap: int = Field(..., description="Chunk overlap used")
+
+
+class DocumentStoreStatsResponse(BaseModel):
+    """Response model for document store statistics"""
+    
+    total_documents: int = Field(..., description="Total number of documents")
+    total_versions: int = Field(..., description="Total number of document versions")
+    total_size_bytes: int = Field(..., description="Total storage size in bytes")
+    db_size_mb: float = Field(..., description="Database size in megabytes")
+    last_updated: Optional[str] = Field(None, description="Last update timestamp")
+
+
+class DocumentVersionInfo(BaseModel):
+    """Information about a document version"""
+    
+    version_id: str = Field(..., description="Version ID")
+    version: int = Field(..., description="Version number")
+    created_at: str = Field(..., description="Version creation timestamp")
+    change_summary: Optional[str] = Field(None, description="Summary of changes")
+    content_preview: str = Field(..., description="Content preview (first 200 chars)")
+
+
+class DocumentVersionsResponse(BaseModel):
+    """Response model for document version history"""
+    
+    document_id: str = Field(..., description="Document ID")
+    filename: str = Field(..., description="Document filename")
+    current_version: int = Field(..., description="Current version number")
+    versions: List[DocumentVersionInfo] = Field(..., description="Version history")
+    total_versions: int = Field(..., description="Total number of versions")
+
+
+class DocumentRestoreRequest(BaseModel):
+    """Request model for restoring document version"""
+    
+    document_id: str = Field(..., description="Document ID", min_length=1)
+    version: int = Field(..., description="Version number to restore to", ge=1)
+    
+    @validator('document_id')
+    def validate_document_id(cls, v):
+        if not v.strip():
+            raise ValueError('Document ID cannot be empty')
+        return v.strip()
+
+
+class DocumentSearchRequest(BaseModel):
+    """Request model for advanced document search"""
+    
+    query: Optional[str] = Field(None, description="Text search query")
+    filename_pattern: Optional[str] = Field(None, description="Filename pattern (supports wildcards)")
+    file_types: Optional[List[str]] = Field(None, description="Filter by file types")
+    date_from: Optional[str] = Field(None, description="Start date (ISO format)")
+    date_to: Optional[str] = Field(None, description="End date (ISO format)")
+    min_file_size: Optional[int] = Field(None, description="Minimum file size in bytes", ge=0)
+    max_file_size: Optional[int] = Field(None, description="Maximum file size in bytes", ge=0)
+    metadata_filters: Optional[Dict[str, Any]] = Field(None, description="Metadata key-value filters")
+    limit: Optional[int] = Field(20, description="Maximum results to return", ge=1, le=100)
+    offset: Optional[int] = Field(0, description="Results to skip", ge=0)
+    
+    @validator('file_types')
+    def validate_file_types(cls, v):
+        if v is not None:
+            allowed_types = ['pdf', 'txt', 'md']
+            for file_type in v:
+                if file_type.lower() not in allowed_types:
+                    raise ValueError(f'File types must be one of: {", ".join(allowed_types)}')
+        return v
+
+
+class DocumentRecord(BaseModel):
+    """Complete document record information"""
+    
+    document_id: str = Field(..., description="Document ID")
+    filename: str = Field(..., description="Original filename")
+    file_type: str = Field(..., description="File type")
+    file_size: int = Field(..., description="File size in bytes")
+    file_hash: str = Field(..., description="File content hash")
+    created_at: str = Field(..., description="Creation timestamp")
+    updated_at: str = Field(..., description="Last update timestamp")
+    version: int = Field(..., description="Current version number")
+    metadata: Dict[str, Any] = Field(..., description="Document metadata")
+    is_active: bool = Field(..., description="Whether document is active")
+
+
+class DocumentSearchResponse(BaseModel):
+    """Response model for document search results"""
+    
+    documents: List[DocumentRecord] = Field(..., description="Matching documents")
+    total_count: int = Field(..., description="Total number of matching documents")
+    query_time: float = Field(..., description="Search time in seconds")
+    filters_applied: Dict[str, Any] = Field(..., description="Applied search filters")
