@@ -62,6 +62,9 @@ vector_store = get_vector_store()
 embeddings_manager = get_embeddings_manager()
 document_store = get_document_store()
 
+# Configure RAG components in chat manager
+chat_model_manager.set_rag_components(document_store, vector_store)
+
 # Active conversations storage (in production, use Redis or database)
 active_conversations: Dict[str, Conversation] = {}
 
@@ -776,7 +779,7 @@ async def search_documents(request: SearchRequest) -> SearchResponse:
 @router.post("/chat/rag", response_model=RAGChatResponse)
 async def rag_chat(request: RAGChatRequest) -> RAGChatResponse:
     """
-    Chat with RAG-enhanced responses
+    Chat with RAG-enhanced responses (using enhanced ChatModelManager)
     """
     try:
         logger.info(f"Received RAG chat request: '{request.message[:50]}...'")
@@ -812,68 +815,38 @@ async def rag_chat(request: RAGChatRequest) -> RAGChatResponse:
         # Add user message
         conversation.add_user_message(request.message)
         
-        # Prepare for RAG
-        rag_used = False
-        search_results = []
-        context_length = 0
-        enhanced_message = request.message
-        
-        # Use RAG if enabled and vector store has content
-        if request.use_rag and vector_store.get_stats()["total_chunks"] > 0:
-            try:
-                # Get similar chunks for context
-                results, formatted_context = vector_store.get_similar_chunks_for_rag(
-                    query=request.message,
-                    max_chunks=request.max_chunks,
-                    similarity_threshold=request.similarity_threshold
-                )
-                
-                if results and formatted_context:
-                    # Enhance message with RAG context
-                    enhanced_message = settings.rag.context_template.format(
-                        context=formatted_context,
-                        question=request.message
-                    )
-                    
-                    # Convert results for response
-                    search_results = [
-                        SearchResult(
-                            chunk_id=result.chunk_metadata.chunk_id,
-                            document_id=result.chunk_metadata.document_id,
-                            content=result.chunk_metadata.content,
-                            similarity_score=result.similarity_score,
-                            rank=result.rank,
-                            page_number=result.chunk_metadata.page_number,
-                            metadata=result.chunk_metadata.chunk_metadata
-                        )
-                        for result in results
-                    ]
-                    
-                    rag_used = True
-                    context_length = len(formatted_context)
-                    
-                    logger.info(f"RAG context added: {len(results)} chunks, {context_length} characters")
-                    
-            except Exception as e:
-                logger.warning(f"RAG failed, falling back to normal chat: {e}")
-        
-        # Update the conversation with the enhanced message if RAG was used
-        if rag_used:
-            # Replace the last user message with enhanced version
-            conversation.messages[-1].content = enhanced_message
-        
-        # Generate response
-        result = await chat_model_manager.chat(
+        # Use the enhanced chat_with_documents method
+        result = await chat_model_manager.chat_with_documents(
             conversation=conversation,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
             top_p=request.top_p,
             top_k=request.top_k,
-            stream=False  # RAG responses are not streamed
+            stream=False,  # RAG responses are not streamed yet
+            use_rag=request.use_rag,
+            max_chunks=request.max_chunks,
+            similarity_threshold=request.similarity_threshold,
+            document_ids=request.document_ids
         )
         
         # Update conversation in storage
         active_conversations[conversation.id] = result["conversation"]
+        
+        # Convert search results to API format if RAG was used
+        search_results = None
+        if result.get("rag_used") and result.get("search_results"):
+            search_results = [
+                SearchResult(
+                    chunk_id=sr["chunk_id"],
+                    document_id=sr["document_id"],
+                    content=sr["content"],
+                    similarity_score=sr["similarity_score"],
+                    rank=sr["rank"],
+                    page_number=sr.get("page_number"),
+                    metadata=sr.get("metadata", {})
+                )
+                for sr in result["search_results"]
+            ]
         
         response = RAGChatResponse(
             response=result["response"],
@@ -882,12 +855,12 @@ async def rag_chat(request: RAGChatRequest) -> RAGChatResponse:
             generation_time=result["generation_time"],
             message_count=len(conversation.messages),
             parameters=result["parameters"],
-            rag_used=rag_used,
-            search_results=search_results if rag_used else None,
-            context_length=context_length if rag_used else None
+            rag_used=result.get("rag_used", False),
+            search_results=search_results,
+            context_length=result.get("context_length")
         )
         
-        logger.info(f"RAG chat response generated in {result['generation_time']:.2f}s (RAG: {rag_used})")
+        logger.info(f"RAG chat response generated in {result['generation_time']:.2f}s (RAG: {result.get('rag_used', False)})")
         return response
         
     except HTTPException:
@@ -897,6 +870,46 @@ async def rag_chat(request: RAGChatRequest) -> RAGChatResponse:
         raise HTTPException(
             status_code=500,
             detail=f"RAG chat failed: {str(e)}"
+        )
+
+
+@router.get("/chat/rag/info")
+async def get_rag_info() -> Dict[str, Any]:
+    """
+    Get RAG configuration and status information from ChatModelManager
+    """
+    try:
+        rag_info = chat_model_manager.get_rag_info()
+        return rag_info
+        
+    except Exception as e:
+        logger.error(f"Failed to get RAG info: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get RAG info: {str(e)}"
+        )
+
+
+@router.post("/chat/rag/search")
+async def search_documents_endpoint(request: SearchRequest) -> Dict[str, Any]:
+    """
+    Search documents using the ChatModelManager (for testing and debugging)
+    """
+    try:
+        result = await chat_model_manager.search_documents(
+            query=request.query,
+            max_chunks=request.k,
+            similarity_threshold=request.similarity_threshold,
+            document_ids=request.document_ids
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Document search via ChatModelManager failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Document search failed: {str(e)}"
         )
 
 
