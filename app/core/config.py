@@ -67,6 +67,7 @@ class RAGSettings(BaseModel):
     # Document storage settings
     documents_dir: str = "./documents"
     vector_db_dir: str = "./vector_db"
+    document_store_db_path: str = "./document_store.db"  # DocumentStore database path
     max_file_size_mb: int = 50  # Maximum file size in MB
     supported_formats: List[str] = ["pdf", "txt", "md"]
     
