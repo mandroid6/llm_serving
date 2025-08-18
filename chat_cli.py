@@ -236,10 +236,132 @@ class ChatAPI:
         response = await self.client.get(f"{self.base_url}/api/v1/chat/conversation/{conv_id}")
         response.raise_for_status()
         return response.json()
+    
+    # RAG-specific methods
+    
+    async def upload_document(self, file_path: str, file_type: str = None, metadata: dict = None) -> Dict[str, Any]:
+        """Upload a document for RAG"""
+        from pathlib import Path
+        
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
+        # Auto-detect file type
+        if not file_type:
+            file_type = file_path.suffix.lower().lstrip('.')
+        
+        # Read file content
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            # Try with latin-1 encoding for some PDFs/text files
+            with open(file_path, 'r', encoding='latin-1') as f:
+                content = f.read()
+        
+        # Prepare upload data
+        upload_data = {
+            "filename": file_path.name,
+            "file_type": file_type,
+            "content": content,
+            "metadata": metadata or {}
+        }
+        
+        response = await self.client.post(
+            f"{self.base_url}/api/v1/documents/upload",
+            json=upload_data
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    async def list_documents(self) -> Dict[str, Any]:
+        """List uploaded documents"""
+        response = await self.client.get(f"{self.base_url}/api/v1/documents")
+        response.raise_for_status()
+        return response.json()
+    
+    async def delete_document(self, document_id: str, hard_delete: bool = False) -> Dict[str, Any]:
+        """Delete a document"""
+        params = {"hard_delete": hard_delete} if hard_delete else {}
+        response = await self.client.delete(
+            f"{self.base_url}/api/v1/documents/{document_id}",
+            params=params
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    async def get_document_chunks(self, document_id: str) -> Dict[str, Any]:
+        """Get document chunks for preview"""
+        response = await self.client.get(f"{self.base_url}/api/v1/documents/{document_id}/chunks")
+        response.raise_for_status()
+        return response.json()
+    
+    async def search_documents(self, query: str, max_chunks: int = 5, similarity_threshold: float = 0.7) -> Dict[str, Any]:
+        """Search documents"""
+        search_data = {
+            "query": query,
+            "k": max_chunks,
+            "similarity_threshold": similarity_threshold
+        }
+        
+        response = await self.client.post(
+            f"{self.base_url}/api/v1/rag/search",
+            json=search_data
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    async def send_rag_message(
+        self,
+        message: str,
+        model_name: str = None,
+        max_tokens: int = 300,
+        temperature: float = 0.6,
+        use_rag: bool = True,
+        max_chunks: int = 5,
+        similarity_threshold: float = 0.7,
+        document_ids: List[str] = None
+    ) -> Dict[str, Any]:
+        """Send a RAG-enhanced chat message"""
+        data = {
+            "message": message,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "use_rag": use_rag,
+            "max_chunks": max_chunks,
+            "similarity_threshold": similarity_threshold
+        }
+        
+        if self.conversation_id:
+            data["conversation_id"] = self.conversation_id
+        if model_name:
+            data["model_name"] = model_name
+        if document_ids:
+            data["document_ids"] = document_ids
+        
+        response = await self.client.post(
+            f"{self.base_url}/api/v1/chat/rag",
+            json=data
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        # Update conversation ID if this was a new conversation
+        if not self.conversation_id:
+            self.conversation_id = result["conversation_id"]
+        
+        return result
+    
+    async def get_rag_info(self) -> Dict[str, Any]:
+        """Get RAG configuration and status"""
+        response = await self.client.get(f"{self.base_url}/api/v1/chat/rag/info")
+        response.raise_for_status()
+        return response.json()
 
 
 class ChatInterface:
-    """Rich command-line chat interface with voice input support"""
+    """Rich command-line chat interface with voice input and RAG support"""
     
     def __init__(self, api: ChatAPI):
         self.api = api
@@ -247,6 +369,17 @@ class ChatInterface:
         self.current_model = "gpt2"
         self.available_models = {}
         self.chat_models = []
+        
+        # RAG configuration
+        self.rag_enabled = True  # RAG mode toggle
+        self.rag_available = False  # Whether RAG is available on server
+        self.rag_info = {}
+        self.uploaded_documents = []
+        self.rag_settings = {
+            "max_chunks": 5,
+            "similarity_threshold": 0.7,
+            "max_tokens": 300
+        }
         
         # Voice input support
         self.voice_manager = None
@@ -287,7 +420,7 @@ class ChatInterface:
                 self.voice_enabled = False
         
     async def initialize(self):
-        """Initialize the chat interface"""
+        """Initialize the chat interface with RAG support"""
         # Test connection
         if not await self.api.test_connection():
             console.print("[red]❌ Cannot connect to API server at {self.api.base_url}")
@@ -305,6 +438,25 @@ class ChatInterface:
             console.print(f"[red]❌ Failed to get models: {e}")
             return False
         
+        # Check RAG availability and get info
+        try:
+            self.rag_info = await self.api.get_rag_info()
+            self.rag_available = self.rag_info.get("rag_enabled", False)
+            
+            if self.rag_available:
+                # Get uploaded documents
+                docs_data = await self.api.list_documents()
+                self.uploaded_documents = docs_data.get("documents", [])
+                console.print(f"[green]✅ RAG system available ({len(self.uploaded_documents)} documents loaded)")
+            else:
+                console.print("[yellow]⚠️ RAG system not available")
+                self.rag_enabled = False
+                
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Could not check RAG status: {e}")
+            self.rag_available = False
+            self.rag_enabled = False
+        
         # Initialize voice input if enabled
         if self.voice_enabled and self.voice_manager:
             try:
@@ -321,7 +473,7 @@ class ChatInterface:
         return True
     
     def show_welcome(self):
-        """Display welcome message"""
+        """Display welcome message with RAG and voice support"""
         voice_status = ""
         voice_commands = ""
         
@@ -333,15 +485,30 @@ class ChatInterface:
 • [cyan]/voice-settings[/cyan] - Voice configuration
 """
         
+        # RAG status and commands
+        rag_status = ""
+        rag_commands = ""
+        
+        if self.rag_available:
+            rag_mode = "[green]ON[/green]" if self.rag_enabled else "[red]OFF[/red]"
+            doc_count = len(self.uploaded_documents)
+            rag_status = f"\n[green]📚 RAG system enabled[/green] ({doc_count} documents) - Mode: {rag_mode}"
+            rag_commands = f"""• [cyan]/upload <file>[/cyan] - Upload document for RAG
+• [cyan]/docs[/cyan] - List uploaded documents
+• [cyan]/search <query>[/cyan] - Search documents
+• [cyan]/rag on/off[/cyan] - Toggle RAG mode
+• [cyan]/rag-info[/cyan] - Show RAG configuration
+"""
+        
         welcome_text = f"""
-[bold blue]🤖 LLM Chat Interface with Voice Support[/bold blue]
-[dim]Connected to: {self.api.base_url}[/dim]{voice_status}
+[bold blue]🤖 LLM Chat Interface with RAG & Voice Support[/bold blue]
+[dim]Connected to: {self.api.base_url}[/dim]{voice_status}{rag_status}
 
 [bold]Available Commands:[/bold]
 • [cyan]/help[/cyan] - Show this help
 • [cyan]/models[/cyan] - List available models
 • [cyan]/switch <model>[/cyan] - Switch models
-{voice_commands}• [cyan]/clear[/cyan] - Clear conversation history  
+{rag_commands}{voice_commands}• [cyan]/clear[/cyan] - Clear conversation history  
 • [cyan]/save <filename>[/cyan] - Save conversation
 • [cyan]/load <filename>[/cyan] - Load conversation
 • [cyan]/quit[/cyan] - Exit
@@ -349,7 +516,7 @@ class ChatInterface:
 [bold]Current Model:[/bold] [green]{self.current_model}[/green]
 [bold]Chat Models:[/bold] {', '.join(self.chat_models)}
 
-[dim]Type your message and press Enter to chat!{' Or use /voice to enable voice input!' if self.voice_enabled else ''}[/dim]
+[dim]Type your message and press Enter to chat!{' RAG will enhance responses with document knowledge.' if self.rag_enabled and self.uploaded_documents else ''}[/dim]
         """
         
         console.print(Panel(welcome_text, title="🚀 Welcome", border_style="blue"))
@@ -535,29 +702,85 @@ class ChatInterface:
                     console.print(f"[cyan]   Try: {', '.join(small_models[:3])}[/cyan]")
     
     async def send_message(self, message: str):
-        """Send a chat message and display response"""
+        """Send a chat message with optional RAG enhancement"""
         try:
-            # Show typing indicator
-            with Live(Spinner("dots", text="[dim]AI is thinking..."), console=console, transient=True):
-                result = await self.api.send_message(message)
+            # Determine if we should use RAG
+            use_rag = self.rag_enabled and self.rag_available and len(self.uploaded_documents) > 0
             
-            # Display response
+            # Show appropriate typing indicator
+            rag_indicator = " with document search" if use_rag else ""
+            spinner_text = f"[dim]AI is thinking{rag_indicator}...[/dim]"
+            
+            with Live(Spinner("dots", text=spinner_text), console=console, transient=True):
+                if use_rag:
+                    # Use RAG-enhanced chat
+                    result = await self.api.send_rag_message(
+                        message=message,
+                        max_tokens=self.rag_settings["max_tokens"],
+                        max_chunks=self.rag_settings["max_chunks"],
+                        similarity_threshold=self.rag_settings["similarity_threshold"],
+                        use_rag=True
+                    )
+                else:
+                    # Use regular chat
+                    result = await self.api.send_message(
+                        message=message,
+                        max_tokens=200
+                    )
+            
+            # Display response with RAG information
             response_text = result["response"]
             model_name = result["model_name"]
             generation_time = result["generation_time"]
             
-            # Format response
+            # Enhanced subtitle with RAG info
+            if use_rag and result.get("rag_used"):
+                # RAG was used successfully
+                search_results = result.get("search_results", [])
+                chunks_found = len(search_results)
+                context_length = result.get("context_length", 0)
+                
+                subtitle = f"🧠 RAG | ⏱️ {generation_time:.2f}s | 📚 {chunks_found} docs | 💬 {result['message_count']} msgs"
+                
+                # Show search results if available
+                if search_results:
+                    self._show_rag_sources(search_results)
+                    
+            elif use_rag and not result.get("rag_used"):
+                # RAG was attempted but no relevant documents found
+                subtitle = f"⏱️ {generation_time:.2f}s | 💬 {result['message_count']} messages | ⚠️ No relevant docs found"
+            else:
+                # Regular chat response
+                subtitle = f"⏱️ {generation_time:.2f}s | 💬 {result['message_count']} messages"
+            
+            # Format response panel
             response_panel = Panel(
                 response_text,
                 title=f"🤖 {model_name}",
-                subtitle=f"⏱️ {generation_time:.2f}s | 💬 {result['message_count']} messages",
-                border_style="green"
+                subtitle=subtitle,
+                border_style="green" if use_rag and result.get("rag_used") else "blue"
             )
             
             console.print(response_panel)
             
         except Exception as e:
             console.print(f"[red]❌ Chat error: {e}")
+    
+    def _show_rag_sources(self, search_results: List[Dict]):
+        """Display RAG source information"""
+        if not search_results:
+            return
+        
+        sources_text = "**Sources used:**\n"
+        for i, result in enumerate(search_results[:3], 1):  # Show top 3 sources
+            doc_id = result.get("document_id", "Unknown")[:16]
+            similarity = result.get("similarity_score", 0)
+            page = result.get("page_number")
+            
+            page_info = f", Page {page}" if page else ""
+            sources_text += f"{i}. Doc `{doc_id}`{page_info} (similarity: {similarity:.2f})\n"
+        
+        console.print(f"[dim]{sources_text.strip()}[/dim]")
     
     async def save_conversation(self, filename: str = None):
         """Save current conversation to file"""
@@ -645,11 +868,31 @@ class ChatInterface:
             return await self.get_text_input()
     
     async def get_text_input(self) -> str:
-        """Get text input from user"""
-        prompt_text = "💬 You: "
+        """Get text input from user with RAG and voice indicators"""
+        # Build prompt with status indicators
+        prompt_indicators = []
+        
+        # Add voice mode indicator
         if self.voice_enabled:
-            mode_indicator = " 🎤" if self.voice_mode else " ⌨️"
-            prompt_text = f"💬 You{mode_indicator}: "
+            voice_indicator = "🎤" if self.voice_mode else "⌨️"
+            prompt_indicators.append(voice_indicator)
+        
+        # Add RAG status indicator
+        if self.rag_available:
+            if self.rag_enabled and len(self.uploaded_documents) > 0:
+                rag_indicator = f"📚{len(self.uploaded_documents)}"
+            elif self.rag_enabled:
+                rag_indicator = "📚❌"  # RAG enabled but no docs
+            else:
+                rag_indicator = "📖"  # RAG disabled
+            prompt_indicators.append(rag_indicator)
+        
+        # Build final prompt
+        if prompt_indicators:
+            indicators = " ".join(prompt_indicators)
+            prompt_text = f"💬 You ({indicators}): "
+        else:
+            prompt_text = "💬 You: "
         
         return toolkit_prompt(
             prompt_text,
@@ -1032,6 +1275,306 @@ class ChatInterface:
         except Exception:
             return None
     
+    # RAG Implementation Methods
+    
+    async def upload_document(self, file_path: str):
+        """Upload a document for RAG with enhanced feedback"""
+        if not self.rag_available:
+            console.print("[red]❌ RAG system not available")
+            return
+        
+        try:
+            from pathlib import Path
+            
+            # Validate file exists
+            path = Path(file_path)
+            if not path.exists():
+                console.print(f"[red]❌ File not found: {file_path}")
+                return
+            
+            # Check file size
+            file_size = path.stat().st_size
+            if file_size > 50 * 1024 * 1024:  # 50MB limit
+                console.print(f"[red]❌ File too large: {file_size / 1024 / 1024:.1f}MB (max 50MB)")
+                return
+            
+            # Show upload progress
+            with Live(Spinner("dots", text=f"[dim]Uploading {path.name}...[/dim]"), console=console, transient=True):
+                result = await self.api.upload_document(file_path)
+            
+            # Update local document list
+            docs_data = await self.api.list_documents()
+            self.uploaded_documents = docs_data.get("documents", [])
+            
+            # Show success with details
+            doc_info = result.get("document", {})
+            console.print(f"[green]✅ Document uploaded successfully!")
+            console.print(f"[dim]ID: {doc_info.get('id', 'Unknown')}")
+            console.print(f"[dim]File: {doc_info.get('filename', path.name)}")
+            console.print(f"[dim]Type: {doc_info.get('file_type', 'Unknown')}")
+            console.print(f"[dim]Size: {file_size / 1024:.1f} KB")
+            console.print(f"[dim]Chunks: {doc_info.get('total_chunks', 'Unknown')}")
+            
+        except FileNotFoundError as e:
+            console.print(f"[red]❌ File not found: {e}")
+        except Exception as e:
+            console.print(f"[red]❌ Upload failed: {e}")
+            if "413" in str(e):
+                console.print("[yellow]💡 File too large. Try a smaller file.")
+            elif "415" in str(e):
+                console.print("[yellow]💡 Unsupported file type. Try PDF, TXT, or MD files.")
+    
+    async def show_documents(self):
+        """Display uploaded documents with details"""
+        if not self.rag_available:
+            console.print("[red]❌ RAG system not available")
+            return
+        
+        try:
+            # Refresh document list
+            docs_data = await self.api.list_documents()
+            self.uploaded_documents = docs_data.get("documents", [])
+            
+            if not self.uploaded_documents:
+                console.print("[yellow]📚 No documents uploaded yet")
+                console.print("[dim]Use /upload <file> to add documents for RAG")
+                return
+            
+            # Create documents table
+            table = Table(title=f"📚 Uploaded Documents ({len(self.uploaded_documents)})")
+            table.add_column("ID", style="cyan", width=12)
+            table.add_column("Filename", style="green")
+            table.add_column("Type", style="yellow", width=8)
+            table.add_column("Size", style="magenta", width=10)
+            table.add_column("Chunks", style="blue", width=8)
+            table.add_column("Uploaded", style="dim", width=12)
+            table.add_column("Status", style="white", width=10)
+            
+            for doc in self.uploaded_documents:
+                # Format upload time
+                upload_time = doc.get("created_at", "")
+                if upload_time:
+                    from datetime import datetime
+                    try:
+                        dt = datetime.fromisoformat(upload_time.replace('Z', '+00:00'))
+                        upload_time = dt.strftime("%m/%d %H:%M")
+                    except:
+                        pass
+                
+                # Format file size
+                file_size = doc.get("file_size", 0)
+                if file_size:
+                    if file_size > 1024 * 1024:
+                        size_str = f"{file_size / (1024 * 1024):.1f}MB"
+                    elif file_size > 1024:
+                        size_str = f"{file_size / 1024:.1f}KB"
+                    else:
+                        size_str = f"{file_size}B"
+                else:
+                    size_str = "Unknown"
+                
+                # Status indicator
+                status = "✅ Ready" if doc.get("status") == "processed" else "⏳ Processing"
+                
+                table.add_row(
+                    doc.get("id", "")[:12],
+                    doc.get("filename", "Unknown"),
+                    doc.get("file_type", "").upper(),
+                    size_str,
+                    str(doc.get("total_chunks", "?")),
+                    upload_time,
+                    status
+                )
+            
+            console.print(table)
+            
+            # Show RAG status
+            rag_mode = "[green]ON[/green]" if self.rag_enabled else "[red]OFF[/red]"
+            console.print(f"\n[dim]RAG Mode: {rag_mode} | Use /rag on|off to toggle[/dim]")
+            
+        except Exception as e:
+            console.print(f"[red]❌ Failed to list documents: {e}")
+    
+    async def search_documents(self, query: str):
+        """Search documents and display results"""
+        if not self.rag_available:
+            console.print("[red]❌ RAG system not available")
+            return
+        
+        if not self.uploaded_documents:
+            console.print("[yellow]📚 No documents available for search")
+            console.print("[dim]Use /upload <file> to add documents first[/dim]")
+            return
+        
+        try:
+            # Show search progress
+            with Live(Spinner("dots", text=f"[dim]Searching documents for: '{query}'...[/dim]"), console=console, transient=True):
+                result = await self.api.search_documents(
+                    query=query,
+                    max_chunks=self.rag_settings["max_chunks"],
+                    similarity_threshold=self.rag_settings["similarity_threshold"]
+                )
+            
+            # Display search results
+            search_results = result.get("results", [])
+            search_time = result.get("search_time", 0)
+            
+            console.print(f"[bold blue]🔍 Search Results for: '{query}'[/bold blue]")
+            console.print(f"[dim]Found {len(search_results)} results in {search_time:.3f}s[/dim]\n")
+            
+            if not search_results:
+                console.print("[yellow]📄 No relevant documents found")
+                console.print(f"[dim]Try different keywords or lower similarity threshold (current: {self.rag_settings['similarity_threshold']})[/dim]")
+                return
+            
+            # Show each result
+            for i, result in enumerate(search_results, 1):
+                similarity = result.get("similarity_score", 0)
+                content = result.get("content", "")
+                doc_id = result.get("document_id", "Unknown")
+                page = result.get("page_number")
+                
+                # Create result panel
+                page_info = f" | Page {page}" if page else ""
+                subtitle = f"Doc: {doc_id[:16]}...{page_info} | Similarity: {similarity:.3f}"
+                
+                # Highlight query terms in content (basic)
+                display_content = content
+                if len(content) > 300:
+                    display_content = content[:300] + "..."
+                
+                result_panel = Panel(
+                    display_content,
+                    title=f"📄 Result {i}",
+                    subtitle=subtitle,
+                    border_style="blue" if similarity > 0.8 else "dim"
+                )
+                console.print(result_panel)
+            
+        except Exception as e:
+            console.print(f"[red]❌ Search failed: {e}")
+    
+    async def toggle_rag_mode(self, mode: str):
+        """Toggle RAG mode on/off"""
+        if not self.rag_available:
+            console.print("[red]❌ RAG system not available")
+            return
+        
+        mode = mode.lower()
+        if mode == "on":
+            self.rag_enabled = True
+            console.print("[green]✅ RAG mode enabled")
+            if not self.uploaded_documents:
+                console.print("[yellow]💡 Upload documents with /upload <file> to use RAG")
+        elif mode == "off":
+            self.rag_enabled = False
+            console.print("[yellow]⚠️ RAG mode disabled")
+            console.print("[dim]Chat will use standard responses without document context[/dim]")
+        else:
+            console.print("[red]Usage: /rag <on|off>")
+            current_status = "[green]ON[/green]" if self.rag_enabled else "[red]OFF[/red]"
+            console.print(f"[yellow]Current status: {current_status}")
+    
+    async def show_rag_info(self):
+        """Display RAG system information and settings"""
+        if not self.rag_available:
+            console.print("[red]❌ RAG system not available")
+            return
+        
+        try:
+            # Get fresh RAG info
+            rag_info = await self.api.get_rag_info()
+            
+            # Document statistics
+            doc_count = len(self.uploaded_documents)
+            total_chunks = sum(doc.get("total_chunks", 0) for doc in self.uploaded_documents)
+            
+            # RAG status
+            mode_status = "[green]ENABLED[/green]" if self.rag_enabled else "[red]DISABLED[/red]"
+            
+            # Create info display
+            info_text = f"""
+[bold]📚 RAG System Information[/bold]
+
+[bold]Status:[/bold]
+• RAG Mode: {mode_status}
+• System Available: [green]{'Yes' if rag_info.get('rag_enabled') else 'No'}[/green]
+• Vector Store: [cyan]{rag_info.get('vector_store_type', 'Unknown')}[/cyan]
+• Embedding Model: [cyan]{rag_info.get('embedding_model', 'Unknown')}[/cyan]
+
+[bold]Documents:[/bold]
+• Uploaded Documents: [cyan]{doc_count}[/cyan]
+• Total Chunks: [cyan]{total_chunks}[/cyan]
+• Max File Size: [cyan]{rag_info.get('max_file_size', 'Unknown')}[/cyan]
+• Supported Types: [cyan]{', '.join(rag_info.get('supported_types', []))}[/cyan]
+
+[bold]Search Settings:[/bold]
+• Max Chunks per Query: [cyan]{self.rag_settings['max_chunks']}[/cyan]
+• Similarity Threshold: [cyan]{self.rag_settings['similarity_threshold']}[/cyan]
+• Max Response Tokens: [cyan]{self.rag_settings['max_tokens']}[/cyan]
+
+[bold]Performance:[/bold]
+• Average Search Time: [cyan]{rag_info.get('avg_search_time', 'N/A')}[/cyan]
+• Cache Hit Rate: [cyan]{rag_info.get('cache_hit_rate', 'N/A')}[/cyan]
+
+[bold]Available Commands:[/bold]
+• [cyan]/upload <file>[/cyan] - Upload document
+• [cyan]/docs[/cyan] - List documents
+• [cyan]/search <query>[/cyan] - Search documents
+• [cyan]/rag on|off[/cyan] - Toggle RAG mode
+• [cyan]/delete-doc <id>[/cyan] - Delete document
+            """
+            
+            console.print(Panel(info_text, title="📚 RAG Information", border_style="blue"))
+            
+        except Exception as e:
+            console.print(f"[red]❌ Failed to get RAG info: {e}")
+    
+    async def delete_document(self, doc_id: str):
+        """Delete a document from RAG system"""
+        if not self.rag_available:
+            console.print("[red]❌ RAG system not available")
+            return
+        
+        try:
+            # Find document by ID (support partial matching)
+            matching_docs = [doc for doc in self.uploaded_documents if doc.get("id", "").startswith(doc_id)]
+            
+            if not matching_docs:
+                console.print(f"[red]❌ Document not found: {doc_id}")
+                console.print("[yellow]Use /docs to see available document IDs")
+                return
+            
+            if len(matching_docs) > 1:
+                console.print(f"[yellow]⚠️ Multiple documents match '{doc_id}':")
+                for doc in matching_docs:
+                    console.print(f"[cyan]  {doc.get('id', '')[:16]} - {doc.get('filename', 'Unknown')}")
+                console.print("[yellow]Please use a more specific ID")
+                return
+            
+            doc = matching_docs[0]
+            full_doc_id = doc.get("id", "")
+            filename = doc.get("filename", "Unknown")
+            
+            # Confirm deletion
+            if not confirm(f"Delete document '{filename}' ({full_doc_id[:16]}...)?"):
+                console.print("[yellow]❌ Deletion cancelled")
+                return
+            
+            # Delete document
+            with Live(Spinner("dots", text=f"[dim]Deleting {filename}...[/dim]"), console=console, transient=True):
+                result = await self.api.delete_document(full_doc_id)
+            
+            # Update local document list
+            docs_data = await self.api.list_documents()
+            self.uploaded_documents = docs_data.get("documents", [])
+            
+            console.print(f"[green]✅ Document deleted: {filename}")
+            console.print(f"[dim]Remaining documents: {len(self.uploaded_documents)}")
+            
+        except Exception as e:
+            console.print(f"[red]❌ Delete failed: {e}")
+
     def show_help(self):
         """Show help message"""
         # Base commands
@@ -1042,6 +1585,29 @@ class ChatInterface:
 [cyan]/save [filename][/cyan] - Save conversation (auto-named if no filename)
 [cyan]/load <filename>[/cyan] - Load saved conversation
 [cyan]/quit[/cyan] or [cyan]/exit[/cyan] - Exit the chat"""
+        
+        # RAG commands (if available)
+        rag_commands = ""
+        rag_tips = ""
+        
+        if self.rag_available:
+            rag_status = "[green]ENABLED[/green]" if self.rag_enabled else "[red]DISABLED[/red]"
+            doc_count = len(self.uploaded_documents)
+            
+            rag_commands = f"""
+[bold]📚 RAG Commands (Status: {rag_status}, {doc_count} docs):[/bold]
+[cyan]/upload <file>[/cyan] - Upload document for RAG (PDF, TXT, MD)
+[cyan]/docs[/cyan] - List uploaded documents
+[cyan]/search <query>[/cyan] - Search documents  
+[cyan]/rag on|off[/cyan] - Toggle RAG mode
+[cyan]/rag-info[/cyan] - Show RAG system information
+[cyan]/delete-doc <id>[/cyan] - Delete document by ID
+"""
+            rag_tips = """• Upload documents to enhance chat responses with contextual knowledge
+• RAG searches documents automatically during chat when enabled
+• Use /search to test document retrieval before chatting
+• Larger chunks provide more context but may reduce precision
+• """
         
         # Voice commands (if available)
         voice_commands = ""
@@ -1066,7 +1632,7 @@ class ChatInterface:
         help_text = f"""
 [bold]📚 Available Commands:[/bold]
 
-{base_commands}{voice_commands}
+{base_commands}{rag_commands}{voice_commands}
 
 [bold]💡 Tips:[/bold]
 • Use Tab for auto-completion
@@ -1074,7 +1640,7 @@ class ChatInterface:
 • Conversations auto-save every 10 messages
 • Model switching shows detailed progress for large downloads
 • Use Qwen and DeepSeek models for best performance
-{voice_tips}
+{rag_tips}{voice_tips}
 [bold]🦙 Recommended Models:[/bold]
 • [green]qwen3-1.8b[/green] - High-quality multilingual, 6GB RAM (default)
 • [green]qwen3-3b[/green] - Advanced quality, 8GB RAM required
@@ -1126,7 +1692,7 @@ class ChatInterface:
         console.print("\n[blue]👋 Goodbye![/blue]")
     
     async def handle_command(self, command: str):
-        """Handle user commands"""
+        """Handle user commands including RAG commands"""
         parts = command.split()
         cmd = parts[0].lower()
         
@@ -1175,6 +1741,41 @@ class ChatInterface:
         
         elif cmd == '/devices':
             self.show_audio_devices()
+        
+        # RAG commands
+        elif cmd == '/upload':
+            if len(parts) < 2:
+                console.print("[red]Usage: /upload <file_path>")
+                console.print("[yellow]Supported formats: PDF, TXT, MD")
+            else:
+                await self.upload_document(parts[1])
+        
+        elif cmd == '/docs':
+            await self.show_documents()
+        
+        elif cmd == '/search':
+            if len(parts) < 2:
+                console.print("[red]Usage: /search <query>")
+            else:
+                query = " ".join(parts[1:])
+                await self.search_documents(query)
+        
+        elif cmd == '/rag':
+            if len(parts) < 2:
+                console.print("[red]Usage: /rag <on|off>")
+                console.print(f"[yellow]Current status: {'ON' if self.rag_enabled else 'OFF'}")
+            else:
+                await self.toggle_rag_mode(parts[1])
+        
+        elif cmd == '/rag-info':
+            await self.show_rag_info()
+        
+        elif cmd == '/delete-doc':
+            if len(parts) < 2:
+                console.print("[red]Usage: /delete-doc <document_id>")
+                console.print("[yellow]Use /docs to see document IDs")
+            else:
+                await self.delete_document(parts[1])
         
         else:
             console.print(f"[red]Unknown command: {command}")
