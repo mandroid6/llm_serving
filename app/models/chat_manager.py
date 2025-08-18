@@ -18,6 +18,12 @@ from threading import Thread
 from app.core.config import settings, get_model_profile, CHAT_TEMPLATES
 from app.models.conversation import Conversation
 
+# RAG imports
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.rag.document_store import DocumentStore
+    from app.rag.vector_store import VectorStore
+
 logger = logging.getLogger(__name__)
 
 
@@ -562,6 +568,303 @@ class ChatModelManager:
         })
         
         return base_info
+    
+    def set_rag_components(self, document_store: 'DocumentStore', vector_store: 'VectorStore'):
+        """Set RAG components for document-aware chat"""
+        self.document_store = document_store
+        self.vector_store = vector_store
+        logger.info("RAG components configured for ChatModelManager")
+    
+    async def chat_with_documents(
+        self,
+        conversation: Conversation,
+        max_tokens: int = None,
+        temperature: float = None,
+        top_p: float = None,
+        top_k: int = None,
+        stream: bool = False,
+        # RAG-specific parameters
+        use_rag: bool = True,
+        max_chunks: int = None,
+        similarity_threshold: float = None,
+        document_ids: Optional[List[str]] = None,
+        max_context_length: int = None
+    ) -> Dict[str, Any]:
+        """
+        Enhanced chat with RAG document search and context injection
+        
+        Args:
+            conversation: The conversation to continue
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Nucleus sampling parameter
+            top_k: Top-k sampling parameter
+            stream: Enable streaming response (not implemented for RAG yet)
+            use_rag: Whether to use RAG for this request
+            max_chunks: Maximum document chunks to include in context
+            similarity_threshold: Minimum similarity score for chunks
+            document_ids: Filter search to specific document IDs
+            max_context_length: Maximum context length for RAG
+            
+        Returns:
+            Dict with response, conversation, RAG metadata, and generation info
+        """
+        
+        if not self.is_loaded:
+            raise RuntimeError("Model is not loaded")
+        
+        # Get the user's message for RAG search
+        last_user_message = conversation.get_last_user_message()
+        if not last_user_message:
+            raise ValueError("No user message found in conversation")
+        
+        # Use RAG settings defaults
+        max_chunks = max_chunks or settings.rag.max_chunks_per_query
+        similarity_threshold = similarity_threshold or settings.rag.similarity_threshold
+        max_context_length = max_context_length or settings.rag.max_context_length
+        
+        # Initialize RAG metadata
+        rag_metadata = {
+            "rag_used": False,
+            "search_results": [],
+            "context_length": 0,
+            "chunks_found": 0,
+            "search_time": 0.0
+        }
+        
+        enhanced_conversation = conversation
+        
+        # Perform RAG search if enabled and components are available
+        if (use_rag and 
+            hasattr(self, 'vector_store') and self.vector_store and 
+            hasattr(self, 'document_store') and self.document_store):
+            
+            try:
+                search_start = time.time()
+                logger.info(f"Performing RAG search for: '{last_user_message[:50]}...'")
+                
+                # Search for relevant document chunks
+                search_results, formatted_context = self.vector_store.get_similar_chunks_for_rag(
+                    query=last_user_message,
+                    max_chunks=max_chunks,
+                    similarity_threshold=similarity_threshold,
+                    max_total_length=max_context_length
+                )
+                
+                search_time = time.time() - search_start
+                rag_metadata["search_time"] = search_time
+                rag_metadata["chunks_found"] = len(search_results)
+                
+                if search_results and formatted_context:
+                    # Create enhanced conversation with RAG context
+                    enhanced_conversation = self._create_rag_conversation(
+                        conversation, last_user_message, formatted_context
+                    )
+                    
+                    # Update RAG metadata
+                    rag_metadata.update({
+                        "rag_used": True,
+                        "search_results": [
+                            {
+                                "chunk_id": result.chunk_metadata.chunk_id,
+                                "document_id": result.chunk_metadata.document_id,
+                                "content": result.chunk_metadata.content[:200] + "..." if len(result.chunk_metadata.content) > 200 else result.chunk_metadata.content,
+                                "similarity_score": result.similarity_score,
+                                "rank": result.rank,
+                                "page_number": result.chunk_metadata.page_number
+                            }
+                            for result in search_results
+                        ],
+                        "context_length": len(formatted_context)
+                    })
+                    
+                    logger.info(f"RAG context added: {len(search_results)} chunks, {len(formatted_context)} chars in {search_time:.2f}s")
+                else:
+                    logger.info(f"No relevant documents found for query (threshold: {similarity_threshold})")
+                    
+            except Exception as e:
+                logger.warning(f"RAG search failed, falling back to normal chat: {e}")
+                # Continue with normal chat if RAG fails
+        
+        elif use_rag:
+            logger.warning("RAG requested but components not available")
+        
+        # Generate response using the enhanced conversation
+        result = await self.chat(
+            conversation=enhanced_conversation,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            stream=stream
+        )
+        
+        # If we used RAG, we need to update the original conversation properly
+        if rag_metadata["rag_used"]:
+            # Add the assistant's response to the original conversation
+            # (the enhanced conversation was just for generation)
+            conversation.add_assistant_message(result["response"])
+            result["conversation"] = conversation
+        
+        # Add RAG metadata to the result
+        result.update(rag_metadata)
+        
+        return result
+    
+    def _create_rag_conversation(
+        self, 
+        original_conversation: Conversation, 
+        user_message: str, 
+        context: str
+    ) -> Conversation:
+        """
+        Create an enhanced conversation with RAG context injected
+        
+        Args:
+            original_conversation: The original conversation
+            user_message: The user's message
+            context: The formatted RAG context
+            
+        Returns:
+            Enhanced conversation with RAG context
+        """
+        
+        # Create a copy of the conversation for RAG enhancement
+        enhanced_conversation = Conversation(
+            system_prompt=original_conversation.system_prompt,
+            max_length=original_conversation.max_length
+        )
+        
+        # Copy all messages except the last user message
+        for message in original_conversation.messages[:-1]:
+            if message.role == "user":
+                enhanced_conversation.add_user_message(message.content)
+            elif message.role == "assistant":
+                enhanced_conversation.add_assistant_message(message.content)
+        
+        # Create enhanced user message with RAG context
+        enhanced_message = settings.rag.context_template.format(
+            context=context,
+            question=user_message
+        )
+        
+        # Add the enhanced message
+        enhanced_conversation.add_user_message(enhanced_message)
+        
+        return enhanced_conversation
+    
+    def get_rag_info(self) -> Dict[str, Any]:
+        """Get information about RAG configuration and status"""
+        
+        rag_info = {
+            "rag_enabled": settings.rag.enabled,
+            "components_loaded": {
+                "document_store": hasattr(self, 'document_store') and self.document_store is not None,
+                "vector_store": hasattr(self, 'vector_store') and self.vector_store is not None
+            },
+            "settings": {
+                "max_chunks_per_query": settings.rag.max_chunks_per_query,
+                "similarity_threshold": settings.rag.similarity_threshold,
+                "max_context_length": settings.rag.max_context_length,
+                "include_source_references": settings.rag.include_source_references,
+                "context_template": settings.rag.context_template[:100] + "..." if len(settings.rag.context_template) > 100 else settings.rag.context_template
+            }
+        }
+        
+        # Add component statistics if available
+        if hasattr(self, 'document_store') and self.document_store:
+            try:
+                doc_stats = self.document_store.get_stats()
+                rag_info["document_store_stats"] = {
+                    "total_documents": doc_stats.get("total_documents", 0),
+                    "total_versions": doc_stats.get("total_versions", 0),
+                    "last_updated": doc_stats.get("last_updated")
+                }
+            except Exception as e:
+                logger.warning(f"Failed to get document store stats: {e}")
+        
+        if hasattr(self, 'vector_store') and self.vector_store:
+            try:
+                vector_stats = self.vector_store.get_stats()
+                rag_info["vector_store_stats"] = {
+                    "total_chunks": vector_stats.get("total_chunks", 0),
+                    "total_documents": vector_stats.get("total_documents", 0),
+                    "index_size_mb": vector_stats.get("index_size_mb", 0.0),
+                    "last_updated": vector_stats.get("last_updated")
+                }
+            except Exception as e:
+                logger.warning(f"Failed to get vector store stats: {e}")
+        
+        return rag_info
+    
+    async def search_documents(
+        self, 
+        query: str,
+        max_chunks: int = None,
+        similarity_threshold: float = None,
+        document_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Search documents without generating a chat response
+        
+        Args:
+            query: Search query
+            max_chunks: Maximum chunks to return
+            similarity_threshold: Minimum similarity score
+            document_ids: Filter by document IDs
+            
+        Returns:
+            Search results with metadata
+        """
+        
+        if not (hasattr(self, 'vector_store') and self.vector_store):
+            raise RuntimeError("Vector store not configured")
+        
+        max_chunks = max_chunks or settings.rag.max_chunks_per_query
+        similarity_threshold = similarity_threshold or settings.rag.similarity_threshold
+        
+        try:
+            start_time = time.time()
+            
+            # Perform the search
+            results = self.vector_store.search(
+                query=query,
+                k=max_chunks,
+                similarity_threshold=similarity_threshold,
+                document_ids=document_ids
+            )
+            
+            search_time = time.time() - start_time
+            
+            # Format results
+            formatted_results = [
+                {
+                    "chunk_id": result.chunk_metadata.chunk_id,
+                    "document_id": result.chunk_metadata.document_id,
+                    "content": result.chunk_metadata.content,
+                    "similarity_score": result.similarity_score,
+                    "rank": result.rank,
+                    "page_number": result.chunk_metadata.page_number,
+                    "metadata": result.chunk_metadata.chunk_metadata
+                }
+                for result in results
+            ]
+            
+            return {
+                "query": query,
+                "results": formatted_results,
+                "total_results": len(formatted_results),
+                "search_time": search_time,
+                "parameters": {
+                    "max_chunks": max_chunks,
+                    "similarity_threshold": similarity_threshold,
+                    "document_ids": document_ids
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Document search failed: {e}")
+            raise RuntimeError(f"Document search failed: {e}")
     
     def switch_model(self, model_name: str, progress_callback: Optional[Callable] = None) -> bool:
         """Switch to a different model with progress tracking"""
