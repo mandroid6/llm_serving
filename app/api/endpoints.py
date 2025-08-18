@@ -26,6 +26,11 @@ from app.models.schemas import (
     DocumentUploadResponse,
     DocumentListResponse,
     DocumentInfo,
+    DocumentDeleteRequest,
+    DocumentDeleteResponse,
+    DocumentChunkInfo,
+    DocumentChunksResponse,
+    DocumentStoreStatsResponse,
     SearchRequest,
     SearchResponse,
     SearchResult,
@@ -41,6 +46,7 @@ from app.core.config import settings, get_model_profile, get_chat_models, get_al
 from app.rag.document_processor import DocumentProcessor, Document
 from app.rag.vector_store import get_vector_store, VectorStore
 from app.rag.embeddings import get_embeddings_manager
+from app.rag.document_store import get_document_store, DocumentStore, SearchFilter
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +60,7 @@ chat_model_manager = ChatModelManager()
 document_processor = DocumentProcessor()
 vector_store = get_vector_store()
 embeddings_manager = get_embeddings_manager()
+document_store = get_document_store()
 
 # Active conversations storage (in production, use Redis or database)
 active_conversations: Dict[str, Conversation] = {}
@@ -445,10 +452,10 @@ async def get_conversation(conversation_id: str) -> ConversationResponse:
 
 # RAG endpoints
 
-@router.post("/rag/documents", response_model=DocumentUploadResponse)
+@router.post("/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(request: DocumentUploadRequest) -> DocumentUploadResponse:
     """
-    Upload and process a document for RAG
+    Upload and process a document for RAG (enhanced with DocumentStore)
     """
     try:
         start_time = time.time()
@@ -472,7 +479,7 @@ async def upload_document(request: DocumentUploadRequest) -> DocumentUploadRespo
             tmp_file.flush()
             
             try:
-                # Process the document
+                # Process the document using DocumentProcessor
                 document = document_processor.process_file(
                     Path(tmp_file.name),
                     custom_metadata=request.metadata
@@ -481,15 +488,25 @@ async def upload_document(request: DocumentUploadRequest) -> DocumentUploadRespo
                 # Override filename to use the provided one
                 document.filename = filename
                 
-                # Add to vector store
-                success = vector_store.add_document(document)
-                if not success:
+                # Store in DocumentStore first (persistent storage)
+                doc_store_success = document_store.add_document(document)
+                if not doc_store_success:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to store document in document store"
+                    )
+                
+                # Add to vector store (for search capabilities)
+                vector_success = vector_store.add_document(document)
+                if not vector_success:
+                    # If vector store fails, we should remove from document store to maintain consistency
+                    document_store.delete_document(document.document_id, soft_delete=False)
                     raise HTTPException(
                         status_code=500,
                         detail="Failed to add document to vector store"
                     )
                 
-                # Save vector store
+                # Save vector store index
                 vector_store.save_index()
                 
                 processing_time = time.time() - start_time
@@ -524,35 +541,40 @@ async def upload_document(request: DocumentUploadRequest) -> DocumentUploadRespo
         )
 
 
-@router.get("/rag/documents", response_model=DocumentListResponse)
+@router.get("/documents", response_model=DocumentListResponse)
 async def list_documents() -> DocumentListResponse:
     """
-    List all stored documents
+    List all stored documents (enhanced with DocumentStore)
     """
     try:
-        # Get documents from vector store
-        vector_documents = vector_store.list_documents()
+        # Get documents from DocumentStore (more complete information)
+        documents_list = document_store.list_documents(include_content=False)
         
-        # Get statistics
-        stats = vector_store.get_stats()
+        # Get vector store stats for chunk counts
+        vector_stats = vector_store.get_stats()
         
         # Convert to response format
-        documents = [
-            DocumentInfo(
-                document_id=doc["document_id"],
-                filename="",  # We don't have filename in vector store directly
-                file_type="",  # We don't have file type in vector store directly
-                chunk_count=doc["chunk_count"],
-                created_at=doc["created_at"],
-                sample_content=doc["sample_content"]
-            )
-            for doc in vector_documents
-        ]
+        documents = []
+        for doc in documents_list:
+            # Get chunks from vector store for this document
+            vector_chunks = vector_store.get_chunks_by_document_id(doc.document_id)
+            
+            documents.append(DocumentInfo(
+                document_id=doc.document_id,
+                filename=doc.filename,
+                file_type=doc.file_type,
+                chunk_count=len(vector_chunks),
+                created_at=doc.created_at.isoformat(),
+                sample_content=doc.content[:200] + "..." if len(doc.content) > 200 else doc.content
+            ))
+        
+        # Get total stats from DocumentStore
+        doc_stats = document_store.get_stats()
         
         response = DocumentListResponse(
             documents=documents,
-            total_count=stats["total_documents"],
-            total_chunks=stats["total_chunks"]
+            total_count=doc_stats["total_documents"],
+            total_chunks=vector_stats["total_chunks"]
         )
         
         return response
@@ -565,28 +587,50 @@ async def list_documents() -> DocumentListResponse:
         )
 
 
-@router.delete("/rag/documents/{document_id}")
-async def delete_document(document_id: str) -> Dict[str, Any]:
+@router.delete("/documents/{document_id}", response_model=DocumentDeleteResponse)
+async def delete_document(document_id: str, hard_delete: bool = False) -> DocumentDeleteResponse:
     """
-    Delete a document and all its chunks
+    Delete a document and all its chunks (enhanced with DocumentStore)
     """
     try:
-        success = vector_store.delete_document(document_id)
-        
-        if not success:
+        # Get document info before deletion for response
+        doc = document_store.get_document(document_id, include_content=False)
+        if not doc:
             raise HTTPException(
                 status_code=404,
                 detail=f"Document not found: {document_id}"
             )
         
+        # Get chunk count before deletion
+        vector_chunks = vector_store.get_chunks_by_document_id(document_id)
+        chunk_count = len(vector_chunks)
+        
+        # Delete from both stores
+        doc_store_success = document_store.delete_document(document_id, soft_delete=not hard_delete)
+        vector_success = vector_store.delete_document(document_id)
+        
+        if not doc_store_success:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete document from document store: {document_id}"
+            )
+        
+        if not vector_success:
+            logger.warning(f"Failed to delete document from vector store: {document_id}")
+            # Don't fail completely if vector store deletion fails, but log it
+        
         # Save vector store after deletion
         vector_store.save_index()
         
-        logger.info(f"Document deleted successfully: {document_id}")
-        return {
-            "message": f"Document {document_id} deleted successfully",
-            "document_id": document_id
-        }
+        delete_type = "hard" if hard_delete else "soft"
+        logger.info(f"Document {delete_type} deleted successfully: {document_id}")
+        
+        return DocumentDeleteResponse(
+            document_id=document_id,
+            status="success",
+            deleted_chunks=chunk_count,
+            message=f"Document {document_id} {delete_type} deleted successfully"
+        )
         
     except HTTPException:
         raise
@@ -595,6 +639,86 @@ async def delete_document(document_id: str) -> Dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to delete document: {str(e)}"
+        )
+
+
+@router.get("/documents/{document_id}/chunks", response_model=DocumentChunksResponse)
+async def get_document_chunks(document_id: str) -> DocumentChunksResponse:
+    """
+    Get document chunks for preview
+    """
+    try:
+        # Get document info from DocumentStore
+        doc = document_store.get_document(document_id, include_content=False)
+        if not doc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Document not found: {document_id}"
+            )
+        
+        # Get chunks from VectorStore (they have the chunk content and metadata)
+        vector_chunks = vector_store.get_chunks_by_document_id(document_id)
+        
+        # Convert to response format
+        chunks = []
+        for chunk_metadata in vector_chunks:
+            chunks.append(DocumentChunkInfo(
+                chunk_id=chunk_metadata.chunk_id,
+                content=chunk_metadata.content,
+                page_number=chunk_metadata.page_number,
+                start_char=chunk_metadata.start_char,
+                end_char=chunk_metadata.end_char,
+                chunk_index=chunk_metadata.chunk_metadata.get("chunk_index", 0),
+                metadata=chunk_metadata.chunk_metadata
+            ))
+        
+        # Sort chunks by index to maintain order
+        chunks.sort(key=lambda x: x.chunk_index)
+        
+        response = DocumentChunksResponse(
+            document_id=document_id,
+            filename=doc.filename,
+            chunks=chunks,
+            total_chunks=len(chunks),
+            chunk_size=settings.rag.chunk_size,
+            chunk_overlap=settings.rag.chunk_overlap
+        )
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get document chunks: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get document chunks: {str(e)}"
+        )
+
+
+@router.get("/documents/stats", response_model=DocumentStoreStatsResponse)
+async def get_document_store_stats() -> DocumentStoreStatsResponse:
+    """
+    Get document store statistics
+    """
+    try:
+        stats = document_store.get_stats()
+        
+        response = DocumentStoreStatsResponse(
+            total_documents=stats["total_documents"],
+            total_versions=stats["total_versions"],
+            total_size_bytes=stats["total_size_bytes"],
+            db_size_mb=stats["db_size_mb"],
+            last_updated=stats.get("last_updated")
+        )
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Failed to get document store stats: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get document store stats: {str(e)}"
         )
 
 
@@ -649,7 +773,7 @@ async def search_documents(request: SearchRequest) -> SearchResponse:
         )
 
 
-@router.post("/rag/chat", response_model=RAGChatResponse)
+@router.post("/chat/rag", response_model=RAGChatResponse)
 async def rag_chat(request: RAGChatRequest) -> RAGChatResponse:
     """
     Chat with RAG-enhanced responses
