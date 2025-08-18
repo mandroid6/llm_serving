@@ -74,7 +74,7 @@ class RAGSettings(BaseModel):
     # Text processing settings
     chunk_size: int = 1000  # Characters per chunk
     chunk_overlap: int = 200  # Overlap between chunks
-    min_chunk_size: int = 100  # Minimum chunk size to keep
+    min_chunk_size: int = 50  # Minimum chunk size to keep
     
     # Embeddings settings
     embeddings_model: str = "all-MiniLM-L6-v2"  # Sentence-transformers model
